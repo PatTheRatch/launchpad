@@ -24,7 +24,9 @@ dependencies = [
 
 [project.optional-dependencies]
 eink = []          # vendor e-ink panel drivers (Raspberry Pi only)
-render = []         # image/drawing backend (e.g. Pillow)
+render = [          # image/drawing backend
+    "pillow>=10.4",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
