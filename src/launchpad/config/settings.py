@@ -76,6 +76,24 @@ DEFAULT_STATIONS: tuple[StationConfig, ...] = (CUSTOM_HOUSE, ROYAL_VICTORIA, CAN
 
 
 @dataclass(frozen=True, slots=True)
+class LocationConfig:
+    """A geographic point to fetch weather for."""
+
+    latitude: float
+    longitude: float
+    display_name: str
+    timezone: str = "Europe/London"
+
+
+#: Default weather location for the current single-location build.
+LONDON_WEATHER = LocationConfig(
+    latitude=51.5074,
+    longitude=-0.1278,
+    display_name="London",
+)
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """Top-level application configuration."""
 

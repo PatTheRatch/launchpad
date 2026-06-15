@@ -16,7 +16,12 @@ from dotenv import load_dotenv
 
 from launchpad.builder import DashboardInputs, DashboardStateBuilder
 from launchpad.config.features import FeatureFlags
-from launchpad.config.settings import DEFAULT_STATIONS, StationConfig
+from launchpad.config.settings import (
+    DEFAULT_STATIONS,
+    LONDON_WEATHER,
+    LocationConfig,
+    StationConfig,
+)
 from launchpad.display.mock_display import MockDisplay
 from launchpad.models.calendar import Agenda, CalendarEvent
 from launchpad.models.dashboard import DashboardState
@@ -36,6 +41,8 @@ from launchpad.models.weather import (
 )
 from launchpad.rendering.frame import Frame
 from launchpad.rendering.portrait import PortraitRenderer
+from launchpad.services.base import ServiceError
+from launchpad.services.core.open_meteo_weather_service import OpenMeteoWeatherService
 from launchpad.services.core.tfl_train_service import MultiStationTrainService
 
 LONDON = ZoneInfo("Europe/London")
@@ -154,23 +161,38 @@ def fetch_live_trains(
     return Result.present(arrivals), summary
 
 
+def fetch_live_weather(location: LocationConfig) -> tuple[Result[WeatherReport], str]:
+    """Fetch live weather, degrading to ``unavailable`` on any service error."""
+    try:
+        report = OpenMeteoWeatherService(location).fetch()
+    except ServiceError:
+        return Result.unavailable(), "weather=unavailable"
+    return Result.present(report), "weather=present"
+
+
 def main() -> int:
     # Load .env at the entry point (not inside the service). The key is optional.
     load_dotenv()
     app_key = os.getenv("TFL_APP_KEY") or None
 
-    train_result, train_status = fetch_live_trains(DEFAULT_STATIONS, app_key)
+    # Real wall clock so the header and dashboard mode reflect "now" (the fixed
+    # PREVIEW_NOW is only for the deterministic test-facing preview).
+    now = datetime.now(LONDON)
 
-    # Trains are live; weather and calendar stay mocked for this step.
+    train_result, train_status = fetch_live_trains(DEFAULT_STATIONS, app_key)
+    weather_result, weather_status = fetch_live_weather(LONDON_WEATHER)
+
+    # Trains and weather are live; calendar stays mocked for this step.
     inputs = DashboardInputs(
         train=train_result,
         calendar=Result.present(build_mock_agenda()),
-        weather=Result.present(build_mock_weather()),
+        weather=weather_result,
     )
-    state = DashboardStateBuilder().build(PREVIEW_NOW, inputs, FeatureFlags())
+    state = DashboardStateBuilder().build(now, inputs, FeatureFlags())
     frame = PortraitRenderer().render(state, PORTRAIT_SIZE)
 
     MockDisplay(PORTRAIT_SIZE, DEFAULT_OUTPUT).show(frame)
     print(f"Rendered {train_status}.")
+    print(f"Rendered {weather_status}.")
     print(f"Wrote {Path(DEFAULT_OUTPUT).resolve()}")
     return 0
