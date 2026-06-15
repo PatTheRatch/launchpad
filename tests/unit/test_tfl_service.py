@@ -11,9 +11,14 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from launchpad.config.settings import CUSTOM_HOUSE
+from launchpad.config.settings import CUSTOM_HOUSE, DEFAULT_STATIONS
+from launchpad.models.result import Availability
 from launchpad.services.base import ServiceError
-from launchpad.services.core.tfl_train_service import TflTrainService, parse_arrivals
+from launchpad.services.core.tfl_train_service import (
+    MultiStationTrainService,
+    TflTrainService,
+    parse_arrivals,
+)
 
 LONDON = ZoneInfo("Europe/London")
 RETRIEVED_AT = datetime(2026, 6, 15, 8, 40, tzinfo=LONDON)
@@ -82,6 +87,22 @@ def test_parse_filters_out_other_lines() -> None:
     assert [d.destination for d in board.departures] == ["Paddington"]
 
 
+def test_parse_filters_by_direction_keeping_blank() -> None:
+    # CUSTOM_HOUSE is pinned to "outbound". Keep outbound + blank-direction
+    # trains; drop confidently-inbound (return-trip) ones.
+    payload = [
+        {"destinationName": "Paddington", "direction": "outbound", "lineId": "elizabeth",
+         "timeToStation": 60, "expectedArrival": "2026-06-15T07:10:00Z"},
+        {"destinationName": "Abbey Wood", "direction": "inbound", "lineId": "elizabeth",
+         "timeToStation": 90, "expectedArrival": "2026-06-15T07:11:00Z"},
+        {"destinationName": "Reading", "direction": "", "lineId": "elizabeth",
+         "timeToStation": 120, "expectedArrival": "2026-06-15T07:12:00Z"},
+    ]
+    board = parse_arrivals(payload, CUSTOM_HOUSE, LONDON, max_departures=5, retrieved_at=RETRIEVED_AT)
+
+    assert [d.destination for d in board.departures] == ["Paddington", "Reading"]
+
+
 def test_parse_empty_list_returns_empty_board() -> None:
     board = parse_arrivals([], CUSTOM_HOUSE, LONDON, max_departures=2, retrieved_at=RETRIEVED_AT)
 
@@ -132,3 +153,55 @@ def test_fetch_empty_array_returns_empty_board() -> None:
 def test_name_includes_station() -> None:
     service = TflTrainService(station=CUSTOM_HOUSE)
     assert service.name == "tfl:Custom House"
+
+
+# --------------------------------------------------------------------------- #
+# MultiStationTrainService (per-station degradation, no network)
+# --------------------------------------------------------------------------- #
+
+
+def _multi_station_handler(request: httpx.Request) -> httpx.Response:
+    """Route by stop point: Custom House populated, Royal Victoria empty,
+    Canning Town fails (500)."""
+    path = request.url.path
+    if "910GCUSTMHS" in path:  # Custom House
+        return httpx.Response(200, json=load_fixture())
+    if "940GZZDLRVC" in path:  # Royal Victoria
+        return httpx.Response(200, json=[])
+    return httpx.Response(500)  # Canning Town
+
+
+def test_multi_station_degrades_each_independently() -> None:
+    transport = httpx.MockTransport(_multi_station_handler)
+    service = MultiStationTrainService(
+        DEFAULT_STATIONS, client=httpx.Client(transport=transport)
+    )
+
+    arrivals = service.fetch_all()
+
+    # Order preserved; each station carries its own availability.
+    assert [a.station for a in arrivals] == ["Custom House", "Royal Victoria", "Canning Town"]
+    assert [a.availability for a in arrivals] == [
+        Availability.PRESENT,
+        Availability.EMPTY,
+        Availability.UNAVAILABLE,
+    ]
+    # Present station has a board with departures; failed station has none.
+    assert arrivals[0].board is not None and arrivals[0].board.departures
+    assert arrivals[2].board is None
+
+
+def test_multi_station_all_present_when_all_populated() -> None:
+    # No lineId on the predictions, so they are kept for every station's line
+    # (the parser keeps predictions whose lineId is absent or matches).
+    payload = [{"destinationName": "Somewhere", "timeToStation": 60,
+                "expectedArrival": "2026-06-15T07:10:00Z"}]
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    service = MultiStationTrainService(
+        DEFAULT_STATIONS, client=httpx.Client(transport=transport)
+    )
+
+    arrivals = service.fetch_all()
+
+    assert len(arrivals) == len(DEFAULT_STATIONS)
+    assert all(a.availability is Availability.PRESENT for a in arrivals)

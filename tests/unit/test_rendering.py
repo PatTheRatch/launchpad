@@ -9,12 +9,17 @@ from PIL import Image
 
 from launchpad.builder import DashboardInputs, DashboardStateBuilder
 from launchpad.config.features import FeatureFlags
-from launchpad.models.result import Result
-from launchpad.models.train import DepartureStatus, TrainBoard, TrainDeparture
+from launchpad.models.result import Availability, Result
+from launchpad.models.train import (
+    DepartureStatus,
+    StationArrivals,
+    TrainBoard,
+    TrainDeparture,
+)
 from launchpad.preview import (
     PORTRAIT_SIZE,
     build_mock_agenda,
-    build_mock_train_board,
+    build_mock_station_arrivals,
     render_preview,
 )
 from launchpad.rendering.portrait import PortraitRenderer
@@ -34,7 +39,7 @@ def test_portrait_render_produces_1bit_frame_at_panel_size() -> None:
 def test_portrait_render_handles_unavailable_weather() -> None:
     now = datetime(2026, 6, 15, 8, 15, tzinfo=LONDON)
     inputs = DashboardInputs(
-        train=Result.present(build_mock_train_board()),
+        train=Result.present(build_mock_station_arrivals()),
         calendar=Result.present(build_mock_agenda()),
         weather=Result.unavailable(),
     )
@@ -60,7 +65,8 @@ def test_portrait_render_handles_long_train_destination() -> None:
             ),
         ),
     )
-    inputs = DashboardInputs(train=Result.present(board))
+    arrivals = (StationArrivals("Custom House", Availability.PRESENT, board),)
+    inputs = DashboardInputs(train=Result.present(arrivals))
     state = DashboardStateBuilder().build(now, inputs, FeatureFlags())
 
     frame = PortraitRenderer().render(state, PORTRAIT_SIZE)

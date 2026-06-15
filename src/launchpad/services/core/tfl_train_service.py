@@ -16,7 +16,13 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from launchpad.config.settings import StationConfig
-from launchpad.models.train import DepartureStatus, TrainBoard, TrainDeparture
+from launchpad.models.result import Availability
+from launchpad.models.train import (
+    DepartureStatus,
+    StationArrivals,
+    TrainBoard,
+    TrainDeparture,
+)
 from launchpad.services.base import ServiceError
 from launchpad.services.core.train_service import TrainService
 
@@ -32,6 +38,19 @@ def _parse_iso_utc(value: str, tz: ZoneInfo) -> datetime:
 def _time_to_station(prediction: dict[str, Any]) -> float:
     value = prediction.get("timeToStation")
     return float(value) if isinstance(value, (int, float)) else math.inf
+
+
+def _direction_ok(prediction: dict[str, Any], station: StationConfig) -> bool:
+    """Whether a prediction matches the station's configured travel direction.
+
+    Predictions whose ``direction`` matches are kept; so are those TfL leaves
+    blank (its direction is occasionally empty for valid wanted trains). Only
+    confidently opposite-direction trains are dropped.
+    """
+    if station.direction is None:
+        return True
+    direction = prediction.get("direction") or ""
+    return direction in (station.direction, "")
 
 
 def _to_departure(prediction: dict[str, Any], tz: ZoneInfo) -> TrainDeparture:
@@ -57,7 +76,11 @@ def parse_arrivals(
     retrieved_at: datetime,
 ) -> TrainBoard:
     """Map a TfL Arrivals JSON array into a :class:`TrainBoard` (pure)."""
-    relevant = [p for p in payload if p.get("lineId", station.line_id) == station.line_id]
+    relevant = [
+        p
+        for p in payload
+        if p.get("lineId", station.line_id) == station.line_id and _direction_ok(p, station)
+    ]
     relevant.sort(key=_time_to_station)
     departures = tuple(_to_departure(p, tz) for p in relevant[:max_departures])
     return TrainBoard(
@@ -93,7 +116,10 @@ class TflTrainService(TrainService):
         return f"tfl:{self._station.display_name}"
 
     def fetch(self) -> TrainBoard:
-        url = f"{self._base_url}/StopPoint/{self._station.stop_point_id}/Arrivals"
+        url = (
+            f"{self._base_url}/Line/{self._station.line_id}"
+            f"/Arrivals/{self._station.stop_point_id}"
+        )
         params = {"app_key": self._app_key} if self._app_key else {}
 
         client = self._client if self._client is not None else httpx.Client(timeout=self._timeout_s)
@@ -125,3 +151,54 @@ class TflTrainService(TrainService):
             raise ServiceError(
                 f"Failed to parse TfL arrivals for {self._station.display_name}."
             ) from exc
+
+
+class MultiStationTrainService:
+    """Fetches arrivals for several stations, degrading each independently.
+
+    Each station is fetched via its own :class:`TflTrainService`; one station's
+    failure becomes an ``UNAVAILABLE`` :class:`StationArrivals` entry and never
+    affects the others. Output preserves the input station order.
+    """
+
+    def __init__(
+        self,
+        stations: tuple[StationConfig, ...],
+        app_key: str | None = None,
+        timeout_s: float = 8.0,
+        max_departures: int = 2,
+        tz: ZoneInfo = LONDON,
+        base_url: str = "https://api.tfl.gov.uk",
+        client: httpx.Client | None = None,
+    ) -> None:
+        self._stations = stations
+        self._services = tuple(
+            TflTrainService(
+                station=station,
+                app_key=app_key,
+                timeout_s=timeout_s,
+                max_departures=max_departures,
+                tz=tz,
+                base_url=base_url,
+                client=client,
+            )
+            for station in stations
+        )
+
+    @property
+    def name(self) -> str:
+        return "tfl:multi"
+
+    def fetch_all(self) -> tuple[StationArrivals, ...]:
+        results: list[StationArrivals] = []
+        for station, service in zip(self._stations, self._services):
+            try:
+                board = service.fetch()
+            except ServiceError:
+                results.append(
+                    StationArrivals(station.display_name, Availability.UNAVAILABLE, None)
+                )
+                continue
+            availability = Availability.PRESENT if board.departures else Availability.EMPTY
+            results.append(StationArrivals(station.display_name, availability, board))
+        return tuple(results)

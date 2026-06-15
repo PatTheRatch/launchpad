@@ -30,7 +30,7 @@ from launchpad.models.experimental.baby import BabySnapshot
 from launchpad.models.experimental.fantasy import FantasySnapshot
 from launchpad.models.experimental.nba import NbaSnapshot
 from launchpad.models.result import Availability, Result
-from launchpad.models.train import TrainBoard
+from launchpad.models.train import StationArrivals
 from launchpad.models.weather import WeatherReport
 
 #: All time-of-day logic is anchored to this zone, regardless of the offset of
@@ -93,7 +93,7 @@ class DashboardInputs:
     Calendar feeds both the "today" and "tomorrow" sections.
     """
 
-    train: Result[TrainBoard] = field(default_factory=Result.unavailable)
+    train: Result[tuple[StationArrivals, ...]] = field(default_factory=Result.unavailable)
     weather: Result[WeatherReport] = field(default_factory=Result.unavailable)
     calendar: Result[Agenda] = field(default_factory=Result.unavailable)
     nba: Result[NbaSnapshot] = field(default_factory=Result.unavailable)

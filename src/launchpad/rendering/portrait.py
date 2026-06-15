@@ -49,6 +49,10 @@ _DIVIDER_PAD = 9
 _TRAIN_STATUS_AREA_W = 150
 _TRAIN_COL_GAP = 12
 
+# Vertical gap between stations within the trains section (smaller than a
+# divider, which separates whole sections).
+_STATION_GAP = 8
+
 _ELLIPSIS = "..."
 
 
@@ -137,6 +141,9 @@ class _Painter:
             )
         self.y += line_height
 
+    def gap(self, px: int) -> None:
+        self.y += px
+
     def divider(self) -> None:
         self.y += _DIVIDER_PAD
         if self.y <= self.height:
@@ -194,27 +201,39 @@ class PortraitRenderer(Renderer):
 
     @staticmethod
     def _draw_trains(painter: _Painter, section: SectionState) -> None:
-        board = section.data
-        title = board.station if board is not None else "Trains"
-        painter.line(title, painter.fonts.title)
-
-        if section.availability is Availability.UNAVAILABLE:
+        # section.data is a tuple of StationArrivals, one per configured station.
+        stations = section.data
+        if section.availability is Availability.UNAVAILABLE or not stations:
+            painter.line("Trains", painter.fonts.title)
             painter.line("Trains unavailable", painter.fonts.secondary)
             return
-        if section.availability is Availability.EMPTY or board is None or not board.departures:
-            painter.line("No departures", painter.fonts.secondary)
-            return
 
-        for departure in board.departures:
+        for index, station in enumerate(stations):
             if painter.exhausted:
                 break
-            when = departure.expected if departure.expected is not None else departure.scheduled
-            status_text = ""
-            if departure.status is DepartureStatus.DELAYED:
-                status_text = "(delayed)"
-            elif departure.status is DepartureStatus.CANCELLED:
-                status_text = "(cancelled)"
-            painter.train_row(departure.destination, f"{when:%H:%M}", status_text)
+            if index > 0:
+                painter.gap(_STATION_GAP)
+            painter.line(station.station, painter.fonts.title)
+
+            if station.availability is Availability.UNAVAILABLE or station.board is None:
+                painter.line("Unavailable", painter.fonts.secondary)
+                continue
+            if station.availability is Availability.EMPTY or not station.board.departures:
+                painter.line("No departures", painter.fonts.secondary)
+                continue
+
+            for departure in station.board.departures:
+                if painter.exhausted:
+                    break
+                when = (
+                    departure.expected if departure.expected is not None else departure.scheduled
+                )
+                status_text = ""
+                if departure.status is DepartureStatus.DELAYED:
+                    status_text = "(delayed)"
+                elif departure.status is DepartureStatus.CANCELLED:
+                    status_text = "(cancelled)"
+                painter.train_row(departure.destination, f"{when:%H:%M}", status_text)
 
     @staticmethod
     def _draw_calendar(painter: _Painter, section: SectionState) -> None:

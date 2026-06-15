@@ -16,13 +16,18 @@ from dotenv import load_dotenv
 
 from launchpad.builder import DashboardInputs, DashboardStateBuilder
 from launchpad.config.features import FeatureFlags
-from launchpad.config.settings import CUSTOM_HOUSE, StationConfig
+from launchpad.config.settings import DEFAULT_STATIONS, StationConfig
 from launchpad.display.mock_display import MockDisplay
 from launchpad.models.calendar import Agenda, CalendarEvent
 from launchpad.models.dashboard import DashboardState
 from launchpad.models.geometry import Size
-from launchpad.models.result import Result
-from launchpad.models.train import DepartureStatus, TrainBoard, TrainDeparture
+from launchpad.models.result import Availability, Result
+from launchpad.models.train import (
+    DepartureStatus,
+    StationArrivals,
+    TrainBoard,
+    TrainDeparture,
+)
 from launchpad.models.weather import (
     CurrentWeather,
     DailyForecast,
@@ -31,8 +36,7 @@ from launchpad.models.weather import (
 )
 from launchpad.rendering.frame import Frame
 from launchpad.rendering.portrait import PortraitRenderer
-from launchpad.services.base import ServiceError
-from launchpad.services.core.tfl_train_service import TflTrainService
+from launchpad.services.core.tfl_train_service import MultiStationTrainService
 
 LONDON = ZoneInfo("Europe/London")
 
@@ -64,6 +68,17 @@ def build_mock_train_board() -> TrainBoard:
             ),
         ),
         retrieved_at=PREVIEW_NOW,
+    )
+
+
+def build_mock_station_arrivals() -> tuple[StationArrivals, ...]:
+    """Deterministic multi-station board exercising every availability path."""
+    return (
+        StationArrivals("Custom House", Availability.PRESENT, build_mock_train_board()),
+        StationArrivals(
+            "Royal Victoria", Availability.EMPTY, TrainBoard(station="Royal Victoria")
+        ),
+        StationArrivals("Canning Town", Availability.UNAVAILABLE, None),
     )
 
 
@@ -111,7 +126,7 @@ def build_mock_weather() -> WeatherReport:
 def build_mock_state() -> DashboardState:
     """Build a MORNING dashboard state via the real builder."""
     inputs = DashboardInputs(
-        train=Result.present(build_mock_train_board()),
+        train=Result.present(build_mock_station_arrivals()),
         calendar=Result.present(build_mock_agenda()),
         weather=Result.present(build_mock_weather()),
     )
@@ -123,19 +138,20 @@ def render_preview() -> Frame:
     return PortraitRenderer().render(build_mock_state(), PORTRAIT_SIZE)
 
 
-def fetch_live_train_result(
-    station: StationConfig,
+def fetch_live_trains(
+    stations: tuple[StationConfig, ...],
     app_key: str | None,
-) -> tuple[Result[TrainBoard], str]:
-    """Fetch live arrivals, degrading gracefully into a Result + status label."""
-    service = TflTrainService(station=station, app_key=app_key)
-    try:
-        board = service.fetch()
-    except ServiceError:
-        return Result.unavailable(), "degraded/unavailable trains"
-    if board.departures:
-        return Result.present(board), "live trains"
-    return Result.empty(), "no live departures"
+) -> tuple[Result[tuple[StationArrivals, ...]], str]:
+    """Fetch live arrivals for all stations, degrading each independently.
+
+    Returns a ``Result`` plus a human-readable per-station status summary. The
+    section is only fully ``unavailable`` if *every* station failed.
+    """
+    arrivals = MultiStationTrainService(stations, app_key=app_key).fetch_all()
+    summary = ", ".join(f"{a.station}={a.availability.value}" for a in arrivals)
+    if all(a.availability is Availability.UNAVAILABLE for a in arrivals):
+        return Result.unavailable(), f"all stations unavailable ({summary})"
+    return Result.present(arrivals), summary
 
 
 def main() -> int:
@@ -143,7 +159,7 @@ def main() -> int:
     load_dotenv()
     app_key = os.getenv("TFL_APP_KEY") or None
 
-    train_result, train_status = fetch_live_train_result(CUSTOM_HOUSE, app_key)
+    train_result, train_status = fetch_live_trains(DEFAULT_STATIONS, app_key)
 
     # Trains are live; weather and calendar stay mocked for this step.
     inputs = DashboardInputs(

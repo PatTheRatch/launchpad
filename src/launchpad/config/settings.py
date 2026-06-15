@@ -36,19 +36,43 @@ class StationConfig:
 
     ``stop_point_id`` may need manual verification/correction against the TfL
     StopPoint API; keep it easy to change here.
+
+    ``direction`` restricts arrivals to a single travel direction (the TfL
+    ``direction`` value, e.g. ``"inbound"``/``"outbound"``). When the home
+    dashboard only ever uses one direction, this drops the return-trip noise.
+    ``None`` keeps both directions. Trains whose direction TfL leaves blank are
+    kept regardless, so a quirky empty value never hides a wanted train.
     """
 
     line_id: str
     stop_point_id: str
     display_name: str
+    direction: str | None = None
 
 
-#: Default station for the current single-station build (Elizabeth line).
+#: The three commute stations from the project vision. Each is pinned to the
+#: "into the city" direction, since that is the only way taken from home.
 CUSTOM_HOUSE = StationConfig(
     line_id="elizabeth",
     stop_point_id="910GCUSTMHS",
     display_name="Custom House",
+    direction="outbound",  # towards Paddington (not Abbey Wood)
 )
+ROYAL_VICTORIA = StationConfig(
+    line_id="dlr",
+    stop_point_id="940GZZDLRVC",
+    display_name="Royal Victoria",
+    direction="inbound",  # towards Canning Town / Bank (not Beckton)
+)
+CANNING_TOWN = StationConfig(
+    line_id="jubilee",
+    stop_point_id="940GZZLUCGT",
+    display_name="Canning Town",
+    direction="inbound",  # westbound into the city (not Stratford)
+)
+
+#: Stations shown on the train board, in display order.
+DEFAULT_STATIONS: tuple[StationConfig, ...] = (CUSTOM_HOUSE, ROYAL_VICTORIA, CANNING_TOWN)
 
 
 @dataclass(frozen=True, slots=True)
