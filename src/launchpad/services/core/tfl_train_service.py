@@ -53,10 +53,28 @@ def _direction_ok(prediction: dict[str, Any], station: StationConfig) -> bool:
     return direction in (station.direction, "")
 
 
+#: TfL destination names carry station-type suffixes (e.g. "Bank DLR Station").
+#: Strip them for a cleaner, glanceable board. Most specific first so e.g.
+#: "DLR Station" wins over the bare "Station" fallback.
+_DESTINATION_SUFFIXES = (
+    " Underground Station",
+    " DLR Station",
+    " Rail Station",
+    " Station",
+)
+
+
+def _clean_destination(name: str) -> str:
+    for suffix in _DESTINATION_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def _to_departure(prediction: dict[str, Any], tz: ZoneInfo) -> TrainDeparture:
-    destination = prediction.get("destinationName") or prediction.get("towards") or "?"
+    raw = prediction.get("destinationName") or prediction.get("towards") or "?"
     return TrainDeparture(
-        destination=destination,
+        destination=_clean_destination(raw),
         # TfL gives live predictions only, so the predicted arrival is stored as
         # `scheduled` and there is no separate `expected` value.
         scheduled=_parse_iso_utc(prediction["expectedArrival"], tz),

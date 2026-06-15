@@ -103,6 +103,27 @@ def test_parse_filters_by_direction_keeping_blank() -> None:
     assert [d.destination for d in board.departures] == ["Paddington", "Reading"]
 
 
+def test_parse_strips_station_suffixes() -> None:
+    payload = [
+        {"destinationName": "Tower Gateway DLR Station", "lineId": "elizabeth",
+         "timeToStation": 60, "expectedArrival": "2026-06-15T07:10:00Z"},
+        {"destinationName": "Stratford Underground Station", "lineId": "elizabeth",
+         "timeToStation": 70, "expectedArrival": "2026-06-15T07:11:00Z"},
+        {"destinationName": "Heathrow Terminal 4 Rail Station", "lineId": "elizabeth",
+         "timeToStation": 80, "expectedArrival": "2026-06-15T07:12:00Z"},
+        {"destinationName": "Paddington", "lineId": "elizabeth",
+         "timeToStation": 90, "expectedArrival": "2026-06-15T07:13:00Z"},
+    ]
+    board = parse_arrivals(payload, CUSTOM_HOUSE, LONDON, max_departures=5, retrieved_at=RETRIEVED_AT)
+
+    assert [d.destination for d in board.departures] == [
+        "Tower Gateway",
+        "Stratford",
+        "Heathrow Terminal 4",
+        "Paddington",
+    ]
+
+
 def test_parse_empty_list_returns_empty_board() -> None:
     board = parse_arrivals([], CUSTOM_HOUSE, LONDON, max_departures=2, retrieved_at=RETRIEVED_AT)
 
