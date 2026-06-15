@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "launchpad"
+version = "0.0.0"
+description = "A Raspberry Pi e-ink family dashboard for the front door."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "Patrick McDowell" }]
+keywords = ["raspberry-pi", "e-ink", "dashboard", "epaper"]
+
+# Core runtime dependencies are intentionally minimal. Hardware- and
+# service-specific packages should be added as optional extras so the core
+# dashboard stays lightweight and portable.
+#
+# tzdata provides the IANA time zone database for zoneinfo so Europe/London
+# (and DST transitions) resolve consistently on every platform.
+dependencies = [
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+eink = []          # vendor e-ink panel drivers (Raspberry Pi only)
+render = []         # image/drawing backend (e.g. Pillow)
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+launchpad = "launchpad.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/launchpad"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.ruff]
+src = ["src", "tests"]
+target-version = "py313"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"

@@ -1,0 +1,9 @@
+# Launchpad runtime dependencies.
+#
+# The core dashboard has no hard third-party requirements yet. Pin concrete
+# packages here as features are implemented. Hardware- and service-specific
+# packages belong in the optional extras defined in pyproject.toml
+# (e.g. `pip install -e .[eink]`, `.[render]`, `.[dev]`).
+
+# IANA time zone database for zoneinfo (Europe/London + DST handling).
+tzdata>=2024.1
