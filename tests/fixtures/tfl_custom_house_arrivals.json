@@ -1,0 +1,29 @@
+[
+  {
+    "destinationName": "Abbey Wood",
+    "towards": "Abbey Wood",
+    "platformName": "Platform 2",
+    "lineName": "Elizabeth line",
+    "lineId": "elizabeth",
+    "timeToStation": 540,
+    "expectedArrival": "2026-06-15T07:32:00Z"
+  },
+  {
+    "destinationName": "Paddington",
+    "towards": "Paddington",
+    "platformName": "Platform 1",
+    "lineName": "Elizabeth line",
+    "lineId": "elizabeth",
+    "timeToStation": 120,
+    "expectedArrival": "2026-06-15T07:25:00Z"
+  },
+  {
+    "destinationName": "Reading",
+    "towards": "Reading",
+    "platformName": "Platform 1",
+    "lineName": "Elizabeth line",
+    "lineId": "elizabeth",
+    "timeToStation": 900,
+    "expectedArrival": "2026-06-15T07:38:00Z"
+  }
+]

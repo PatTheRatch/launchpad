@@ -31,6 +31,27 @@ class RefreshSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class StationConfig:
+    """A single TfL stop point to fetch arrivals for.
+
+    ``stop_point_id`` may need manual verification/correction against the TfL
+    StopPoint API; keep it easy to change here.
+    """
+
+    line_id: str
+    stop_point_id: str
+    display_name: str
+
+
+#: Default station for the current single-station build (Elizabeth line).
+CUSTOM_HOUSE = StationConfig(
+    line_id="elizabeth",
+    stop_point_id="910GCUSTMHS",
+    display_name="Custom House",
+)
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """Top-level application configuration."""
 

@@ -27,6 +27,10 @@ eink = []          # vendor e-ink panel drivers (Raspberry Pi only)
 render = [          # image/drawing backend
     "pillow>=10.4",
 ]
+tfl = [             # live TfL Arrivals integration (typed HTTP + .env loading)
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
