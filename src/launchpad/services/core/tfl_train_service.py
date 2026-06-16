@@ -24,7 +24,7 @@ from launchpad.models.train import (
     TrainDeparture,
 )
 from launchpad.services.base import ServiceError
-from launchpad.services.core.train_service import TrainService
+from launchpad.services.core.train_service import TrainService, TrainsProvider
 
 LONDON = ZoneInfo("Europe/London")
 
@@ -171,7 +171,7 @@ class TflTrainService(TrainService):
             ) from exc
 
 
-class MultiStationTrainService:
+class MultiStationTrainService(TrainsProvider):
     """Fetches arrivals for several stations, degrading each independently.
 
     Each station is fetched via its own :class:`TflTrainService`; one station's
