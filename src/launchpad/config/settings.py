@@ -7,6 +7,7 @@ stays swappable.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from launchpad.config.features import FeatureFlags
@@ -102,6 +103,56 @@ class Settings:
     features: FeatureFlags = field(default_factory=FeatureFlags)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+
+
+def _load_dotenv() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv()
+
+
 def load_settings() -> Settings:
-    """Load settings from the environment/config files. Not implemented yet."""
-    raise NotImplementedError
+    """Load settings from the environment and optional ``.env`` file."""
+    _load_dotenv()
+
+    orientation_value = os.getenv("LAUNCHPAD_DISPLAY_ORIENTATION", Orientation.PORTRAIT.value)
+    try:
+        orientation = Orientation(orientation_value)
+    except ValueError as exc:
+        raise ValueError(
+            "LAUNCHPAD_DISPLAY_ORIENTATION must be 'portrait' or 'landscape'."
+        ) from exc
+
+    return Settings(
+        display=DisplaySettings(
+            orientation=orientation,
+            width=_env_int("LAUNCHPAD_DISPLAY_WIDTH", 480),
+            height=_env_int("LAUNCHPAD_DISPLAY_HEIGHT", 800),
+            driver=os.getenv("LAUNCHPAD_DISPLAY_DRIVER", "mock"),
+        ),
+        refresh=RefreshSettings(
+            refresh_seconds=_env_int("LAUNCHPAD_REFRESH_SECONDS", 300),
+        ),
+        features=FeatureFlags(
+            nba=_env_bool("LAUNCHPAD_FEATURE_NBA", False),
+            fantasy_basketball=_env_bool("LAUNCHPAD_FEATURE_FANTASY_BASKETBALL", False),
+            baby_tracking=_env_bool("LAUNCHPAD_FEATURE_BABY_TRACKING", False),
+        ),
+    )

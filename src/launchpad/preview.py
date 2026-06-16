@@ -1,28 +1,17 @@
-"""Local preview: build a mock dashboard and render it to a PNG.
+"""Mock dashboard fixtures for deterministic rendering.
 
-The mock :class:`DashboardState` is built here in one place and reused by both
-the entry point and the renderer test, so the previewed frame and the tested
-frame are always identical. No network calls or real data sources are involved.
+Builds a :class:`DashboardState` from mock data in one place, reused by the
+renderer tests (and handy for ad-hoc local preview). No network calls or real
+data sources are involved — the live app is wired in ``factory``/``app``.
 """
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
-
-from dotenv import load_dotenv
 
 from launchpad.builder import DashboardInputs, DashboardStateBuilder
 from launchpad.config.features import FeatureFlags
-from launchpad.config.settings import (
-    DEFAULT_STATIONS,
-    LONDON_WEATHER,
-    LocationConfig,
-    StationConfig,
-)
-from launchpad.display.mock_display import MockDisplay
 from launchpad.models.calendar import Agenda, CalendarEvent
 from launchpad.models.dashboard import DashboardState
 from launchpad.models.geometry import Size
@@ -41,9 +30,6 @@ from launchpad.models.weather import (
 )
 from launchpad.rendering.frame import Frame
 from launchpad.rendering.portrait import PortraitRenderer
-from launchpad.services.base import ServiceError
-from launchpad.services.core.open_meteo_weather_service import OpenMeteoWeatherService
-from launchpad.services.core.tfl_train_service import MultiStationTrainService
 
 LONDON = ZoneInfo("Europe/London")
 
@@ -52,8 +38,6 @@ PORTRAIT_SIZE = Size(width=480, height=800)
 
 #: Fixed "now" so previews land in MORNING and stay deterministic.
 PREVIEW_NOW = datetime(2026, 6, 15, 8, 15, tzinfo=LONDON)
-
-DEFAULT_OUTPUT = "dashboard.png"
 
 
 def _at(hour: int, minute: int) -> datetime:
@@ -143,56 +127,3 @@ def build_mock_state() -> DashboardState:
 def render_preview() -> Frame:
     """Render the mock state at the true portrait size."""
     return PortraitRenderer().render(build_mock_state(), PORTRAIT_SIZE)
-
-
-def fetch_live_trains(
-    stations: tuple[StationConfig, ...],
-    app_key: str | None,
-) -> tuple[Result[tuple[StationArrivals, ...]], str]:
-    """Fetch live arrivals for all stations, degrading each independently.
-
-    Returns a ``Result`` plus a human-readable per-station status summary. The
-    section is only fully ``unavailable`` if *every* station failed.
-    """
-    arrivals = MultiStationTrainService(stations, app_key=app_key).fetch_all()
-    summary = ", ".join(f"{a.station}={a.availability.value}" for a in arrivals)
-    if all(a.availability is Availability.UNAVAILABLE for a in arrivals):
-        return Result.unavailable(), f"all stations unavailable ({summary})"
-    return Result.present(arrivals), summary
-
-
-def fetch_live_weather(location: LocationConfig) -> tuple[Result[WeatherReport], str]:
-    """Fetch live weather, degrading to ``unavailable`` on any service error."""
-    try:
-        report = OpenMeteoWeatherService(location).fetch()
-    except ServiceError:
-        return Result.unavailable(), "weather=unavailable"
-    return Result.present(report), "weather=present"
-
-
-def main() -> int:
-    # Load .env at the entry point (not inside the service). The key is optional.
-    load_dotenv()
-    app_key = os.getenv("TFL_APP_KEY") or None
-
-    # Real wall clock so the header and dashboard mode reflect "now" (the fixed
-    # PREVIEW_NOW is only for the deterministic test-facing preview).
-    now = datetime.now(LONDON)
-
-    train_result, train_status = fetch_live_trains(DEFAULT_STATIONS, app_key)
-    weather_result, weather_status = fetch_live_weather(LONDON_WEATHER)
-
-    # Trains and weather are live; calendar stays mocked for this step.
-    inputs = DashboardInputs(
-        train=train_result,
-        calendar=Result.present(build_mock_agenda()),
-        weather=weather_result,
-    )
-    state = DashboardStateBuilder().build(now, inputs, FeatureFlags())
-    frame = PortraitRenderer().render(state, PORTRAIT_SIZE)
-
-    MockDisplay(PORTRAIT_SIZE, DEFAULT_OUTPUT).show(frame)
-    print(f"Rendered {train_status}.")
-    print(f"Rendered {weather_status}.")
-    print(f"Wrote {Path(DEFAULT_OUTPUT).resolve()}")
-    return 0
