@@ -18,6 +18,7 @@ from launchpad.models.geometry import Size
 from launchpad.models.result import Availability, Result
 from launchpad.models.train import (
     DepartureStatus,
+    LineStatus,
     StationArrivals,
     TrainBoard,
     TrainDeparture,
@@ -65,9 +66,17 @@ def build_mock_train_board() -> TrainBoard:
 def build_mock_station_arrivals() -> tuple[StationArrivals, ...]:
     """Deterministic multi-station board exercising every availability path."""
     return (
-        StationArrivals("Custom House", Availability.PRESENT, build_mock_train_board()),
         StationArrivals(
-            "Royal Victoria", Availability.EMPTY, TrainBoard(station="Royal Victoria")
+            "Custom House",
+            Availability.PRESENT,
+            build_mock_train_board(),
+            LineStatus("Good Service", 10),
+        ),
+        StationArrivals(
+            "Royal Victoria",
+            Availability.EMPTY,
+            TrainBoard(station="Royal Victoria"),
+            LineStatus("Minor Delays", 9),
         ),
         StationArrivals("Canning Town", Availability.UNAVAILABLE, None),
     )

@@ -18,6 +18,7 @@ from launchpad.services.core.tfl_train_service import (
     MultiStationTrainService,
     TflTrainService,
     parse_arrivals,
+    parse_line_statuses,
 )
 
 LONDON = ZoneInfo("Europe/London")
@@ -210,6 +211,63 @@ def test_multi_station_degrades_each_independently() -> None:
     # Present station has a board with departures; failed station has none.
     assert arrivals[0].board is not None and arrivals[0].board.departures
     assert arrivals[2].board is None
+
+
+def test_parse_line_statuses_maps_id_to_status() -> None:
+    payload = [
+        {"id": "jubilee", "lineStatuses": [
+            {"statusSeverity": 9, "statusSeverityDescription": "Minor Delays"}]},
+        {"id": "dlr", "lineStatuses": [
+            {"statusSeverity": 10, "statusSeverityDescription": "Good Service"}]},
+        {"id": "broken"},  # malformed -> skipped, not raised
+    ]
+    statuses = parse_line_statuses(payload)
+
+    assert set(statuses) == {"jubilee", "dlr"}
+    assert statuses["jubilee"].description == "Minor Delays"
+    assert statuses["jubilee"].severity == 9
+    assert statuses["jubilee"].is_good_service is False
+    assert statuses["dlr"].is_good_service is True
+
+
+def test_multi_station_attaches_line_status() -> None:
+    statuses = [
+        {"id": "jubilee", "lineStatuses": [
+            {"statusSeverity": 9, "statusSeverityDescription": "Minor Delays"}]},
+        {"id": "elizabeth", "lineStatuses": [
+            {"statusSeverity": 10, "statusSeverityDescription": "Good Service"}]},
+        {"id": "dlr", "lineStatuses": [
+            {"statusSeverity": 10, "statusSeverityDescription": "Good Service"}]},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/Status" in request.url.path:
+            return httpx.Response(200, json=statuses)
+        return httpx.Response(200, json=load_fixture())
+
+    service = MultiStationTrainService(
+        DEFAULT_STATIONS, client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    by_line = {s.line_id: s for s in DEFAULT_STATIONS}
+    arrivals = {a.station: a for a in service.fetch_all()}
+
+    assert arrivals[by_line["jubilee"].display_name].line_status is not None
+    assert arrivals[by_line["jubilee"].display_name].line_status.description == "Minor Delays"  # type: ignore[union-attr]
+    assert arrivals[by_line["elizabeth"].display_name].line_status.is_good_service is True  # type: ignore[union-attr]
+
+
+def test_multi_station_status_failure_leaves_line_status_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/Status" in request.url.path:
+            return httpx.Response(500)
+        return httpx.Response(200, json=load_fixture())
+
+    service = MultiStationTrainService(
+        DEFAULT_STATIONS, client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    arrivals = service.fetch_all()
+
+    assert all(a.line_status is None for a in arrivals)
 
 
 def test_multi_station_all_present_when_all_populated() -> None:

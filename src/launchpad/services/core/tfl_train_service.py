@@ -19,6 +19,7 @@ from launchpad.config.settings import StationConfig
 from launchpad.models.result import Availability
 from launchpad.models.train import (
     DepartureStatus,
+    LineStatus,
     StationArrivals,
     TrainBoard,
     TrainDeparture,
@@ -171,6 +172,32 @@ class TflTrainService(TrainService):
             ) from exc
 
 
+def parse_line_statuses(payload: Any) -> dict[str, LineStatus]:
+    """Map a TfL ``/Line/{ids}/Status`` response to ``line_id -> LineStatus``.
+
+    Pure and defensive: a malformed entry is skipped rather than raising, so a
+    partial response still yields whatever statuses it could parse.
+    """
+    statuses: dict[str, LineStatus] = {}
+    if not isinstance(payload, list):
+        return statuses
+    for line in payload:
+        if not isinstance(line, dict):
+            continue
+        line_id = line.get("id")
+        line_statuses = line.get("lineStatuses")
+        if not isinstance(line_id, str) or not isinstance(line_statuses, list) or not line_statuses:
+            continue
+        first = line_statuses[0]
+        if not isinstance(first, dict):
+            continue
+        description = first.get("statusSeverityDescription")
+        severity = first.get("statusSeverity")
+        if isinstance(description, str) and isinstance(severity, int):
+            statuses[line_id] = LineStatus(description=description, severity=severity)
+    return statuses
+
+
 class MultiStationTrainService(TrainsProvider):
     """Fetches arrivals for several stations, degrading each independently.
 
@@ -190,6 +217,10 @@ class MultiStationTrainService(TrainsProvider):
         client: httpx.Client | None = None,
     ) -> None:
         self._stations = stations
+        self._app_key = app_key
+        self._timeout_s = timeout_s
+        self._base_url = base_url.rstrip("/")
+        self._client = client
         self._services = tuple(
             TflTrainService(
                 station=station,
@@ -208,15 +239,41 @@ class MultiStationTrainService(TrainsProvider):
         return "tfl:multi"
 
     def fetch_all(self) -> tuple[StationArrivals, ...]:
+        statuses = self._fetch_line_statuses()
         results: list[StationArrivals] = []
         for station, service in zip(self._stations, self._services):
+            line_status = statuses.get(station.line_id)
             try:
                 board = service.fetch()
             except ServiceError:
                 results.append(
-                    StationArrivals(station.display_name, Availability.UNAVAILABLE, None)
+                    StationArrivals(
+                        station.display_name, Availability.UNAVAILABLE, None, line_status
+                    )
                 )
                 continue
             availability = Availability.PRESENT if board.departures else Availability.EMPTY
-            results.append(StationArrivals(station.display_name, availability, board))
+            results.append(
+                StationArrivals(station.display_name, availability, board, line_status)
+            )
         return tuple(results)
+
+    def _fetch_line_statuses(self) -> dict[str, LineStatus]:
+        """Fetch each line's service status; degrade to empty on any failure."""
+        line_ids = sorted({station.line_id for station in self._stations})
+        if not line_ids:
+            return {}
+        url = f"{self._base_url}/Line/{','.join(line_ids)}/Status"
+        params = {"app_key": self._app_key} if self._app_key else {}
+        client = self._client if self._client is not None else httpx.Client(timeout=self._timeout_s)
+        owns_client = self._client is None
+        try:
+            response = client.get(url, params=params, timeout=self._timeout_s)
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError):
+            return {}
+        finally:
+            if owns_client:
+                client.close()
+        return parse_line_statuses(payload)

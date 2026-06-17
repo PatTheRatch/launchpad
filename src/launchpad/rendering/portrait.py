@@ -26,6 +26,7 @@ from launchpad.models.weather import WeatherCondition
 from launchpad.rendering.base import Renderer
 from launchpad.rendering.fonts import Font, load_font
 from launchpad.rendering.frame import Frame
+from launchpad.rendering.weather_icons import draw_weather_icon
 
 # Pixel values for 1-bit images: 1 = white background, 0 = black ink.
 _WHITE = 1
@@ -52,6 +53,12 @@ _TRAIN_COL_GAP = 12
 # Vertical gap between stations within the trains section (smaller than a
 # divider, which separates whole sections).
 _STATION_GAP = 8
+
+# Weather icon, drawn beside the primary weather line. Sized to roughly the
+# primary text height; the line indents by this width plus a gap so text and
+# icon never overlap.
+_WEATHER_ICON_PX = 24
+_WEATHER_ICON_GAP = 12
 
 _ELLIPSIS = "..."
 
@@ -98,8 +105,8 @@ class _Painter:
         bbox = self.draw.textbbox((0, 0), "Ahgyltpq", font=font)
         return int(bbox[3] - bbox[1]) + _LEADING
 
-    def line(self, text: str, font: Font, *, indent: int = 0) -> None:
-        max_width = self.width - 2 * _MARGIN_X - indent
+    def line(self, text: str, font: Font, *, indent: int = 0, reserve_right: int = 0) -> None:
+        max_width = self.width - 2 * _MARGIN_X - indent - reserve_right
         content = _truncate(self.draw, text, font, max_width)
         line_height = self._line_height(font)
         if self.y + line_height <= self.height:
@@ -129,6 +136,35 @@ class _Painter:
                 status_max = (self.width - _MARGIN_X) - status_x
                 status = _truncate(self.draw, status_text, font, status_max)
                 self.draw.text((status_x, self.y), status, font=font, fill=_BLACK)
+        self.y += line_height
+
+    def title_with_status(self, title: str, status: str | None) -> None:
+        """Draw a section title, with an optional status right-aligned beside it.
+
+        The title uses the title font; the status uses the smaller secondary
+        font, vertically centered on the title. The title is truncated so it
+        never overlaps the status.
+        """
+        title_font = self.fonts.title
+        line_height = self._line_height(title_font)
+        if not status:
+            self.line(title, title_font)
+            return
+
+        status_font = self.fonts.secondary
+        status_width = _text_width(self.draw, status, status_font)
+        title_max = self.width - 2 * _MARGIN_X - status_width - _TRAIN_COL_GAP
+        title_text = _truncate(self.draw, title, title_font, title_max)
+        if self.y + line_height <= self.height:
+            self.draw.text((_MARGIN_X, self.y), title_text, font=title_font, fill=_BLACK)
+            status_h = self.draw.textbbox((0, 0), "Ag", font=status_font)[3]
+            status_y = self.y + max(0, (line_height - _LEADING - status_h) // 2)
+            self.draw.text(
+                (self.width - _MARGIN_X - status_width, status_y),
+                status,
+                font=status_font,
+                fill=_BLACK,
+            )
         self.y += line_height
 
     def header_row(self, left: str, right: str, font: Font) -> None:
@@ -213,7 +249,12 @@ class PortraitRenderer(Renderer):
                 break
             if index > 0:
                 painter.gap(_STATION_GAP)
-            painter.line(station.station, painter.fonts.title)
+            # Show line status only when it's a disruption (hide "Good Service").
+            status = station.line_status
+            status_text = (
+                status.description if status is not None and not status.is_good_service else None
+            )
+            painter.title_with_status(station.station, status_text)
 
             if station.availability is Availability.UNAVAILABLE or station.board is None:
                 painter.line("Unavailable", painter.fonts.secondary)
@@ -271,19 +312,76 @@ class PortraitRenderer(Renderer):
         primary = f"{round(current.temperature_c)}\u00b0C"
         if condition:
             primary += f"   {condition}"
-        painter.line(primary, painter.fonts.primary)
+
+        # Center the icon on the primary line and indent the text so the glyph
+        # reads as part of the weather phrase. UNKNOWN draws no icon.
+        draw_icon = current.condition is not WeatherCondition.UNKNOWN
+        line_top = painter.y
+        if draw_icon:
+            visible_h = painter._line_height(painter.fonts.primary) - _LEADING
+            icon_y = line_top + max(0, (visible_h - _WEATHER_ICON_PX) // 2)
+            draw_weather_icon(
+                painter.draw,
+                current.condition,
+                _MARGIN_X,
+                icon_y,
+                _WEATHER_ICON_PX,
+            )
+            painter.line(
+                primary,
+                painter.fonts.primary,
+                indent=_WEATHER_ICON_PX + _WEATHER_ICON_GAP,
+            )
+        else:
+            painter.line(primary, painter.fonts.primary)
 
         details: list[str] = []
         if current.feels_like_c is not None:
             details.append(f"Feels {round(current.feels_like_c)}\u00b0C")
+        high_c: float | None = None
+        precipitation_pct: float | None = None
         if report.forecast:
             forecast = report.forecast[0]
+            high_c = forecast.high_c
+            precipitation_pct = forecast.precipitation_pct
             details.append(f"H {round(forecast.high_c)}\u00b0  L {round(forecast.low_c)}\u00b0")
+            if forecast.precipitation_pct is not None:
+                details.append(f"Rain {round(forecast.precipitation_pct)}%")
         if details:
             painter.line("   ".join(details), painter.fonts.secondary)
+
+        hint = _outerwear_hint(
+            current.temperature_c,
+            current.feels_like_c,
+            high_c,
+            precipitation_pct,
+        )
+        if hint:
+            painter.line(hint, painter.fonts.secondary)
 
 
 def _condition_text(condition: WeatherCondition) -> str:
     if condition is WeatherCondition.UNKNOWN:
         return ""
     return str(condition.value).replace("_", " ").title()
+
+
+def _outerwear_hint(
+    temperature_c: float,
+    feels_like_c: float | None,
+    high_c: float | None,
+    precipitation_pct: float | None,
+) -> str | None:
+    """Return a compact clothing/weather hint when one is useful."""
+    feels = feels_like_c if feels_like_c is not None else temperature_c
+    high = high_c if high_c is not None else temperature_c
+
+    if precipitation_pct is not None and precipitation_pct >= 55:
+        return "Bring an umbrella"
+    if feels <= 5:
+        return "Wear a warm coat"
+    if feels <= 12 or high <= 14:
+        return "Bring a jacket"
+    if feels <= 17 and high <= 21:
+        return "Light jacket"
+    return None
