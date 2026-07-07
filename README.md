@@ -6,17 +6,36 @@ Launchpad shows a household the few things it needs to start the day smoothly �
 **train departures, weather, and the day's calendar** — on an e-ink panel that
 can be read in a five-second glance.
 
-> ⚠️ **Status: scaffold.** This repository currently contains only the project
-> structure, data models, and interfaces. There is no working functionality
-> yet — most methods raise `NotImplementedError`.
+**Status: working core, pre-hardware.** The dashboard renders live TfL train
+departures and Open-Meteo weather to a PNG via the mock display. The calendar
+is still mock data, and the real e-ink panel driver is not yet implemented.
+
+| Feature | Status |
+| --- | --- |
+| Dashboard orchestration (collect → build → render → show) | ✅ implemented |
+| Train departures (TfL, 3 stations, direction-filtered, line status) | ✅ live |
+| Weather (Open-Meteo, icons, outerwear hints) | ✅ live |
+| Time-of-day modes (morning/daytime/evening/overnight) | ✅ implemented |
+| Portrait renderer (480×800, 1-bit) | ✅ implemented |
+| Mock display (writes `dashboard.png`) | ✅ implemented |
+| Calendar | 🔶 mock data |
+| World Cup watchlist (experimental, behind flag) | 🔶 mock data |
+| E-ink display driver | ⬜ stub |
+| Landscape renderer | ⬜ stub |
+| NBA / fantasy basketball / baby tracking (experimental) | ⬜ interfaces only |
+
+### Documentation map
+
+- `README.md` (this file) — project overview and quickstart
+- [`LAUNCHPAD.md`](LAUNCHPAD.md) — operator reference: system state, commands, deployment
+- [`docs/PROJECT_VISION.md`](docs/PROJECT_VISION.md) — long-term product direction and philosophy
 
 ## Design principles
 
 - **Core features always work.** Train departures, weather, and calendar are
   never gated and are isolated from anything experimental.
-- **Experimental features are isolated.** NBA/Cavs, fantasy basketball, and
-  baby tracking are opt-in via feature flags and can fail without affecting the
-  core dashboard.
+- **Experimental features are isolated.** They are opt-in via feature flags and
+  can fail without affecting the core dashboard.
 - **Glanceable.** The layout targets a five-second read.
 - **SOLID & swappable.** Each service is independent and replaceable, rendering
   is decoupled from data retrieval, and display hardware is abstracted away.
@@ -34,56 +53,42 @@ Services  ──►  DashboardState  ──►  Renderer  ──►  Frame  ─�
   models. They never render. The generic `DataService[T]` interface keeps every
   service single-responsibility and interchangeable.
 - **Models** (`launchpad.models`) are immutable dataclasses — the contract
-  between services and renderers. `DashboardState` aggregates everything needed
-  to draw one frame.
+  between services and renderers. Each result is wrapped in a three-state
+  `Result[T]` (present / empty / unavailable) so failures degrade gracefully.
+- **Builder** (`launchpad.builder`) is a pure function from gathered results to
+  an immutable `DashboardState`: it resolves the time-of-day mode and which
+  sections are visible. No I/O, no clock reads.
 - **Renderers** (`launchpad.rendering`) turn a `DashboardState` into a neutral
-  `Frame`. Portrait and landscape layouts are separate implementations of the
-  same `Renderer` interface; reusable `Widget`s draw individual sections.
-- **Displays** (`launchpad.display`) only know how to show a `Frame`. A
-  `MockDisplay` runs anywhere for development; an `EinkDisplay` drives the real
-  panel on the Pi.
+  `Frame`. `PortraitRenderer` is the real one; landscape is a stub.
+- **Displays** (`launchpad.display`) only know how to show a `Frame`.
+  `MockDisplay` writes `dashboard.png` anywhere for development; `EinkDisplay`
+  will drive the real panel on the Pi (not yet implemented).
 - **Composition** (`launchpad.app`, `launchpad.factory`) wires concrete
   collaborators together based on `Settings`. Everything else depends only on
   abstractions.
 
-This separation is what makes the system extensible: adding a feature means
-adding a model + service (+ optional widget) without touching the core, and
-swapping orientation or hardware means choosing a different renderer or display.
+Adding a feature means adding a model + service + renderer section without
+touching the core; swapping orientation or hardware means choosing a different
+renderer or display.
 
 ## Project structure
 
 ```
 src/launchpad/
-├── app.py                  # Dashboard orchestrator (composition root)
-├── factory.py              # Build collaborators from settings
+├── app.py                  # Dashboard orchestrator (collect/refresh/run)
+├── builder.py              # Pure DashboardState builder + mode logic
+├── factory.py              # Composition root: settings → collaborators
+├── preview.py              # Deterministic mock fixtures for tests/previews
 ├── __main__.py             # `python -m launchpad` entry point
-├── config/
-│   ├── settings.py         # Settings dataclasses
-│   └── features.py         # Experimental feature flags
-├── models/
-│   ├── geometry.py         # Orientation, Size, Region
-│   ├── dashboard.py        # DashboardState (the render view-model)
-│   ├── train.py            # Core
-│   ├── weather.py          # Core
-│   ├── calendar.py         # Core
-│   └── experimental/       # nba, fantasy, baby
+├── config/                 # Settings, feature flags, station config
+├── models/                 # Immutable dataclasses (+ experimental/)
 ├── services/
-│   ├── base.py             # DataService[T] interface, ServiceError
-│   ├── core/               # train, weather, calendar services
-│   └── experimental/       # nba, fantasy, baby services
-├── rendering/
-│   ├── base.py             # Renderer interface
-│   ├── frame.py            # Frame (renderer → display boundary)
-│   ├── portrait.py         # PortraitRenderer
-│   ├── landscape.py        # LandscapeRenderer
-│   └── widgets/            # per-section drawers
-└── display/
-    ├── base.py             # Display interface
-    ├── mock_display.py     # Dev/preview display
-    └── eink_display.py     # Real e-ink panel
+│   ├── core/               # TfL trains, Open-Meteo weather, mock calendar
+│   └── experimental/       # World Cup (mock); NBA/fantasy/baby interfaces
+├── rendering/              # PortraitRenderer, fonts, weather icons
+└── display/                # MockDisplay (PNG), EinkDisplay (stub)
 tests/
-├── unit/
-└── integration/
+└── unit/
 ```
 
 ## Requirements
@@ -95,27 +100,48 @@ tests/
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,render,tfl]"
 ```
 
-Run the tests (placeholders are skipped until functionality lands):
+The extras matter: `render` brings Pillow, `tfl` brings httpx and python-dotenv.
+Installing bare or with `.[dev]` alone will fail at runtime with missing
+imports.
+
+Configuration is via environment variables, loaded from a local `.env` file:
 
 ```bash
-pytest
+cp .env.example .env   # then fill in values; .env is gitignored
 ```
 
-Run the dashboard (not implemented yet):
+Render the dashboard once (writes `dashboard.png`, a gitignored local
+artifact):
 
 ```bash
 python -m launchpad
 ```
 
+Run continuously on the configured refresh interval (how it runs as a service
+on the Pi — see [`LAUNCHPAD.md`](LAUNCHPAD.md) and `deploy/launchpad.service`):
+
+```bash
+LAUNCHPAD_RUN_FOREVER=1 python -m launchpad
+```
+
+Checks:
+
+```bash
+pytest
+ruff check .
+mypy src
+```
+
 ## Roadmap
 
-1. Implement core services (train, weather, calendar) against a mock display.
-2. Implement the portrait renderer and core widgets.
-3. Add the e-ink display driver on the Raspberry Pi.
-4. Layer in experimental features behind their flags.
+1. ~~Implement core services (train, weather) against a mock display.~~
+2. ~~Implement the portrait renderer.~~
+3. Replace the mock calendar with a real (shared family) calendar integration.
+4. Add the e-ink display driver on the Raspberry Pi.
+5. Layer in experimental features behind their flags.
 
 ## License
 
