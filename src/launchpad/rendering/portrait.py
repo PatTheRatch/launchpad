@@ -215,6 +215,7 @@ class PortraitRenderer(Renderer):
             Section.CALENDAR: self._draw_calendar,
             Section.CALENDAR_TOMORROW: self._draw_calendar,
             Section.WEATHER: self._draw_weather,
+            Section.WORLD_CUP: self._draw_world_cup,
         }
 
         drawn = 0
@@ -294,6 +295,33 @@ class PortraitRenderer(Renderer):
                 break
             time_label = "All day" if event.all_day else f"{event.start:%H:%M}"
             painter.line(f"{time_label}   {event.title}", painter.fonts.primary)
+
+    @staticmethod
+    def _draw_world_cup(painter: _Painter, section: SectionState) -> None:
+        painter.line("WORLD CUP", painter.fonts.title)
+
+        watchlist = section.data
+        if (
+            section.availability is not Availability.PRESENT
+            or watchlist is None
+            or not watchlist.teams
+        ):
+            painter.line("No watchlist", painter.fonts.secondary)
+            return
+
+        for index, team in enumerate(watchlist.teams):
+            if painter.exhausted:
+                break
+            if index > 0:
+                painter.gap(_STATION_GAP)
+            painter.line(team.team_name, painter.fonts.title)
+            if team.last_result:
+                painter.line(f"Last: {team.last_result}", painter.fonts.secondary)
+            if team.next_match:
+                painter.line(f"Next: {team.next_match}", painter.fonts.secondary)
+            # group_summary is the lowest-priority line; drop it once space runs out.
+            if team.group_summary and not painter.exhausted:
+                painter.line(team.group_summary, painter.fonts.secondary)
 
     @staticmethod
     def _draw_weather(painter: _Painter, section: SectionState) -> None:

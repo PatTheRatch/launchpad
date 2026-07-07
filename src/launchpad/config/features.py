@@ -21,3 +21,4 @@ class FeatureFlags:
     nba: bool = False
     fantasy_basketball: bool = False
     baby_tracking: bool = False
+    world_cup: bool = False

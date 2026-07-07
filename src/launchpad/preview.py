@@ -23,6 +23,10 @@ from launchpad.models.train import (
     TrainBoard,
     TrainDeparture,
 )
+from launchpad.models.experimental.world_cup import (
+    WorldCupTeamWatch,
+    WorldCupWatchlist,
+)
 from launchpad.models.weather import (
     CurrentWeather,
     DailyForecast,
@@ -117,6 +121,36 @@ def build_mock_weather() -> WeatherReport:
                 low_c=8.0,
                 condition=WeatherCondition.CLOUDY,
                 precipitation_pct=20.0,
+            ),
+        ),
+        retrieved_at=PREVIEW_NOW,
+    )
+
+
+def build_mock_world_cup_watchlist() -> WorldCupWatchlist:
+    """Deterministic World Cup watchlist (USA, France, Senegal) for tests."""
+    return WorldCupWatchlist(
+        teams=(
+            WorldCupTeamWatch(
+                team_name="USA",
+                team_code="USA",
+                last_result="beat Paraguay 4-1",
+                next_match="vs Australia, Fri 20 Jun",
+                group_summary="Group D: 3 pts",
+            ),
+            WorldCupTeamWatch(
+                team_name="France",
+                team_code="FRA",
+                last_result="beat Senegal 3-1",
+                next_match="vs Iraq, Mon 22 Jun",
+                group_summary="Group I: 3 pts",
+            ),
+            WorldCupTeamWatch(
+                team_name="Senegal",
+                team_code="SEN",
+                last_result="lost to France 1-3",
+                next_match="vs Norway, Mon 22 Jun",
+                group_summary="Group I: 0 pts",
             ),
         ),
         retrieved_at=PREVIEW_NOW,

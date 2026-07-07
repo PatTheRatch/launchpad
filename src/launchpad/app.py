@@ -33,6 +33,7 @@ from launchpad.services.core.weather_service import WeatherService
 from launchpad.services.experimental.baby_service import BabyService
 from launchpad.services.experimental.fantasy_service import FantasyService
 from launchpad.services.experimental.nba_service import NbaService
+from launchpad.services.experimental.world_cup_service import WorldCupService
 
 T = TypeVar("T")
 
@@ -55,6 +56,7 @@ class ExperimentalServices:
     nba: NbaService | None = None
     fantasy: FantasyService | None = None
     baby: BabyService | None = None
+    world_cup: WorldCupService | None = None
 
 
 class Dashboard:
@@ -93,8 +95,11 @@ class Dashboard:
             nba=self._optional_result(self._experimental.nba),
             fantasy=self._optional_result(self._experimental.fantasy),
             baby=self._optional_result(self._experimental.baby),
+            world_cup=self._optional_result(self._experimental.world_cup),
         )
-        return DashboardStateBuilder().build(now, inputs, self._settings.features)
+        return DashboardStateBuilder().build(
+            now, inputs, self._settings.features, self._settings.force_mode
+        )
 
     def refresh_once(self) -> None:
         """Collect data, render a frame, and show it once."""

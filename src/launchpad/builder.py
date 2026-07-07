@@ -29,6 +29,7 @@ from launchpad.models.dashboard import (
 from launchpad.models.experimental.baby import BabySnapshot
 from launchpad.models.experimental.fantasy import FantasySnapshot
 from launchpad.models.experimental.nba import NbaSnapshot
+from launchpad.models.experimental.world_cup import WorldCupWatchlist
 from launchpad.models.result import Availability, Result
 from launchpad.models.train import StationArrivals
 from launchpad.models.weather import WeatherReport
@@ -49,13 +50,24 @@ _OVERNIGHT_START = time(22, 0)
 #: ``if`` statements. Order is render priority (highest first).
 MODE_SECTIONS: Mapping[DashboardMode, tuple[Section, ...]] = MappingProxyType(
     {
-        DashboardMode.MORNING: (Section.TRAINS, Section.CALENDAR, Section.WEATHER),
-        DashboardMode.DAYTIME: (Section.TRAINS, Section.CALENDAR, Section.WEATHER),
+        DashboardMode.MORNING: (
+            Section.TRAINS,
+            Section.CALENDAR,
+            Section.WEATHER,
+            Section.WORLD_CUP,
+        ),
+        DashboardMode.DAYTIME: (
+            Section.TRAINS,
+            Section.CALENDAR,
+            Section.WEATHER,
+            Section.WORLD_CUP,
+        ),
         DashboardMode.EVENING: (
             Section.CALENDAR_TOMORROW,
             Section.NBA,
             Section.FANTASY,
             Section.BABY,
+            Section.WORLD_CUP,
         ),
         DashboardMode.OVERNIGHT: (Section.WEATHER, Section.CALENDAR_TOMORROW),
     }
@@ -71,6 +83,7 @@ SECTION_CATEGORY: Mapping[Section, SectionCategory] = MappingProxyType(
         Section.NBA: SectionCategory.EXPERIMENTAL,
         Section.FANTASY: SectionCategory.EXPERIMENTAL,
         Section.BABY: SectionCategory.EXPERIMENTAL,
+        Section.WORLD_CUP: SectionCategory.EXPERIMENTAL,
     }
 )
 
@@ -80,6 +93,7 @@ EXPERIMENTAL_FLAG: Mapping[Section, str] = MappingProxyType(
         Section.NBA: "nba",
         Section.FANTASY: "fantasy_basketball",
         Section.BABY: "baby_tracking",
+        Section.WORLD_CUP: "world_cup",
     }
 )
 
@@ -99,6 +113,7 @@ class DashboardInputs:
     nba: Result[NbaSnapshot] = field(default_factory=Result.unavailable)
     fantasy: Result[FantasySnapshot] = field(default_factory=Result.unavailable)
     baby: Result[BabySnapshot] = field(default_factory=Result.unavailable)
+    world_cup: Result[WorldCupWatchlist] = field(default_factory=Result.unavailable)
 
 
 def resolve_mode(now: datetime) -> DashboardMode:
@@ -136,9 +151,10 @@ class DashboardStateBuilder:
         now: datetime,
         inputs: DashboardInputs,
         flags: FeatureFlags,
+        mode_override: DashboardMode | None = None,
     ) -> DashboardState:
         """Resolve mode, visibility, availability, and data into one state."""
-        mode = resolve_mode(now)
+        mode = mode_override if mode_override is not None else resolve_mode(now)
 
         sections: dict[Section, SectionState] = {}
         for section in MODE_SECTIONS[mode]:
@@ -166,6 +182,7 @@ class DashboardStateBuilder:
             Section.NBA: inputs.nba,
             Section.FANTASY: inputs.fantasy,
             Section.BABY: inputs.baby,
+            Section.WORLD_CUP: inputs.world_cup,
         }
         return sources[section]
 

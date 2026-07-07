@@ -22,6 +22,7 @@ from launchpad.rendering.portrait import PortraitRenderer
 from launchpad.services.core.mock_calendar_service import MockCalendarService
 from launchpad.services.core.open_meteo_weather_service import OpenMeteoWeatherService
 from launchpad.services.core.tfl_train_service import MultiStationTrainService
+from launchpad.services.experimental.mock_world_cup_service import MockWorldCupService
 
 
 def build_renderer(settings: Settings) -> Renderer:
@@ -53,8 +54,11 @@ def build_dashboard(settings: Settings) -> Dashboard:
         weather=OpenMeteoWeatherService(LONDON_WEATHER),
         calendar=MockCalendarService(),
     )
-    # TODO: Wire experimental services once concrete implementations exist.
-    experimental = ExperimentalServices()
+    # Experimental services are registered only when their feature flag is on,
+    # keeping them fully isolated from the core sections.
+    experimental = ExperimentalServices(
+        world_cup=MockWorldCupService() if settings.features.world_cup else None,
+    )
     renderer = build_renderer(settings)
     display = build_display(settings)
     return Dashboard(settings, core, renderer, display, experimental)

@@ -158,17 +158,20 @@ def test_mode_sections_table_matches_vision() -> None:
         Section.TRAINS,
         Section.CALENDAR,
         Section.WEATHER,
+        Section.WORLD_CUP,
     )
     assert MODE_SECTIONS[DashboardMode.DAYTIME] == (
         Section.TRAINS,
         Section.CALENDAR,
         Section.WEATHER,
+        Section.WORLD_CUP,
     )
     assert MODE_SECTIONS[DashboardMode.EVENING] == (
         Section.CALENDAR_TOMORROW,
         Section.NBA,
         Section.FANTASY,
         Section.BABY,
+        Section.WORLD_CUP,
     )
     assert MODE_SECTIONS[DashboardMode.OVERNIGHT] == (
         Section.WEATHER,
@@ -351,7 +354,7 @@ def test_all_empty_inputs_produce_valid_state(
     assert state.mode is expected_mode
 
     # No experimental section should appear (flags off, no data).
-    for section in (Section.NBA, Section.FANTASY, Section.BABY):
+    for section in (Section.NBA, Section.FANTASY, Section.BABY, Section.WORLD_CUP):
         assert state.get(section) is None
 
     # Every visible section is core and marked unavailable; nothing crashes.
@@ -363,6 +366,6 @@ def test_all_empty_inputs_produce_valid_state(
     expected_core = tuple(
         section
         for section in MODE_SECTIONS[expected_mode]
-        if section not in (Section.NBA, Section.FANTASY, Section.BABY)
+        if section not in (Section.NBA, Section.FANTASY, Section.BABY, Section.WORLD_CUP)
     )
     assert tuple(s.section for s in state.visible_sections) == expected_core

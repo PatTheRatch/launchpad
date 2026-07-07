@@ -47,6 +47,7 @@ class Section(str, Enum):
     NBA = "nba"
     FANTASY = "fantasy"
     BABY = "baby"
+    WORLD_CUP = "world_cup"
 
 
 @dataclass(frozen=True, slots=True)
