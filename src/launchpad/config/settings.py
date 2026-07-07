@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass, field
 
 from launchpad.config.features import FeatureFlags
+from launchpad.models.dashboard import DashboardMode
 from launchpad.models.geometry import Orientation
 
 
@@ -101,6 +102,7 @@ class Settings:
     display: DisplaySettings = field(default_factory=DisplaySettings)
     refresh: RefreshSettings = field(default_factory=RefreshSettings)
     features: FeatureFlags = field(default_factory=FeatureFlags)
+    force_mode: DashboardMode | None = None
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -154,5 +156,19 @@ def load_settings() -> Settings:
             nba=_env_bool("LAUNCHPAD_FEATURE_NBA", False),
             fantasy_basketball=_env_bool("LAUNCHPAD_FEATURE_FANTASY_BASKETBALL", False),
             baby_tracking=_env_bool("LAUNCHPAD_FEATURE_BABY_TRACKING", False),
+            world_cup=_env_bool("LAUNCHPAD_FEATURE_WORLD_CUP", False),
         ),
+        force_mode=_parse_force_mode(os.getenv("LAUNCHPAD_FORCE_MODE")),
     )
+
+
+def _parse_force_mode(value: str | None) -> DashboardMode | None:
+    if value is None:
+        return None
+    try:
+        return DashboardMode(value.strip().lower())
+    except ValueError as exc:
+        valid = ", ".join(m.value for m in DashboardMode)
+        raise ValueError(
+            f"LAUNCHPAD_FORCE_MODE must be one of: {valid}."
+        ) from exc
