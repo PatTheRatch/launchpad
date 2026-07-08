@@ -1,0 +1,31 @@
+# Launchpad configuration web server systemd unit.
+#
+# Serves the config UI at http://launchpad.local:8080. Runs independently
+# of the dashboard process — reads/writes config.json only.
+#
+# Install:
+#   sudo cp deploy/launchpad-config.service /etc/systemd/system/launchpad-config.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now launchpad-config
+#
+# Inspect:
+#   systemctl status launchpad-config
+#   journalctl -u launchpad-config -f
+
+[Unit]
+Description=Launchpad configuration web UI
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=aisha
+Group=launchpad
+WorkingDirectory=/opt/launchpad
+Environment=PYTHONPATH=src
+ExecStart=/opt/launchpad/.venv/bin/python3 -m launchpad.config_server
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,9 +1,13 @@
-# Launchpad systemd unit.
+# Launchpad dashboard systemd unit.
 #
-# Assumes the canonical checkout at /opt/launchpad with a provisioned venv
-# (python3 -m venv .venv && .venv/bin/pip install -e ".[render,tfl]").
-# Secrets/config come from /opt/launchpad/.env, which the app loads itself
-# via python-dotenv at startup.
+# Runs the dashboard continuously with the e-ink display driver on the
+# Waveshare 7.5" V2 panel (800x480).
+#
+# Prerequisites:
+#   - /opt/launchpad checkout with provisioned venv
+#   - Waveshare e-Paper library at /opt/e-Paper/ (symlinked into venv)
+#   - aisha user in spi and gpio groups
+#   - SPI enabled via raspi-config
 #
 # Install:
 #   sudo cp deploy/launchpad.service /etc/systemd/system/launchpad.service
@@ -21,13 +25,18 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=patrick
+User=aisha
 Group=launchpad
 WorkingDirectory=/opt/launchpad
+Environment=PYTHONPATH=src
 Environment=LAUNCHPAD_RUN_FOREVER=1
-ExecStart=/opt/launchpad/.venv/bin/python -m launchpad
+Environment=LAUNCHPAD_DISPLAY_DRIVER=eink
+ExecStart=/opt/launchpad/.venv/bin/python3 -m launchpad
 Restart=on-failure
 RestartSec=30
+
+# Allow the process to access SPI and GPIO devices
+SupplementaryGroups=spi,gpio
 
 [Install]
 WantedBy=multi-user.target

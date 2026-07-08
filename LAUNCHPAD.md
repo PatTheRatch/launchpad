@@ -74,12 +74,13 @@ Key code paths:
 - live Open-Meteo weather integration
 - mock calendar service
 - mock PNG display output
+- real e-ink display driver (Waveshare 7.5" V2, July 2026)
+- web-based configuration UI (config.json + Flask server, July 2026)
 - time-of-day dashboard modes
 - optional mock World Cup section behind feature flag
 
 ### Partial / stubbed
 - landscape renderer
-- e-ink hardware display driver
 - real calendar integration
 - real NBA integration
 - real fantasy basketball integration
@@ -130,13 +131,27 @@ Current state:
 - `mock`:
   - implemented
   - writes rendered PNG output to `dashboard.png`
-- `eink`:
-  - class exists
-  - real hardware behavior is not yet implemented
+- `eink` (implemented July 2026):
+  - drives Waveshare 7.5" V2 panel (800×480)
+  - lazy-imports hardware libraries so Mac dev environments never fail
+  - set `LAUNCHPAD_DISPLAY_DRIVER=eink` to use real hardware
+  - uses SPI (CE0) + GPIO pins (DC=25, RST=17, BUSY=24)
+  - requires `aisha` user in `spi` and `gpio` groups
 
-Current production implication:
-- the codebase is ready for PNG/mock rendering workflows
-- it is not yet fully ready for direct real-panel operation without completing the e-ink driver
+### Hardware setup
+Waveshare library at `/opt/e-Paper/` (git clone), symlinked into venv.
+Venv uses `--system-site-packages` for `spidev`/`RPi.GPIO` visibility.
+
+One-shot render on hardware:
+```
+cd /opt/launchpad
+PYTHONPATH=src LAUNCHPAD_DISPLAY_DRIVER=eink .venv/bin/python3 -m launchpad
+```
+
+### Configuration web UI
+A Flask-based config server runs alongside the dashboard at
+`http://launchpad.local:8080`. It reads/writes `config.json` (persistent
+settings) and can restart the dashboard service. See `deploy/launchpad-config.service`.
 
 ## 9. Dashboard modes
 
@@ -213,14 +228,15 @@ Declared package model (`pyproject.toml` is the single source of truth):
 
 Canonical provisioning (run from the repo root):
 ```bash
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
-pip install -e ".[dev,render,tfl]"
+pip install -e ".[dev,render,tfl,web]"
 ```
 
-On an operator-only box, `.[render,tfl]` is sufficient; `dev` adds the test
-and lint toolchain. Installing without the `render` and `tfl` extras leaves
-the app unable to import Pillow/httpx/dotenv at runtime.
+`--system-site-packages` is required on the Pi so the Waveshare SPI/GPIO
+libraries (`spidev`, `RPi.GPIO`/`lgpio`) are visible from the venv. On a Mac
+dev machine, a plain `python3 -m venv .venv` is fine — the hardware driver
+lazy-imports and will never be triggered.
 
 `.venv` is intentionally untracked; it exists per-machine as an operational
 convention, not a repo artifact.
@@ -257,20 +273,31 @@ launchpad
 ```
 
 ### Deployment (systemd)
-A unit file is checked in at `deploy/launchpad.service`. It runs the venv's
-Python with `LAUNCHPAD_RUN_FOREVER=1` from `/opt/launchpad`, as
-`User=patrick` / `Group=launchpad`, restarting on failure.
+Two unit files are checked in under `deploy/`:
+
+**Dashboard** (`deploy/launchpad.service`):
+Runs the dashboard continuously with `LAUNCHPAD_DISPLAY_DRIVER=eink` as
+`User=aisha` / `Group=launchpad`, restarting on failure.
+
+**Config UI** (`deploy/launchpad-config.service`):
+Serves the web config UI on port 8080. Runs independently of the dashboard
+process so configuration changes and restarts don't take down the UI.
 
 ```bash
 sudo cp deploy/launchpad.service /etc/systemd/system/launchpad.service
+sudo cp deploy/launchpad-config.service /etc/systemd/system/launchpad-config.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now launchpad
+sudo systemctl enable --now launchpad launchpad-config
 journalctl -u launchpad -f
 ```
 
-Still missing (intentional, future work):
-- deploy/update script (currently: `git pull` + `systemctl restart launchpad`)
-- watchdog/health-check behaviour beyond systemd `Restart=on-failure`
+The config UI's "Restart Dashboard" button calls `sudo systemctl restart launchpad`.
+For this to work, `/etc/sudoers.d/launchpad` must allow `aisha` passwordless sudo
+for those commands:
+```
+aisha ALL=(root) NOPASSWD: /usr/bin/systemctl restart launchpad
+aisha ALL=(root) NOPASSWD: /usr/bin/systemctl status launchpad
+```
 
 ## 14. Common commands
 
@@ -356,13 +383,14 @@ Current gaps:
 ## 17. Current roadmap
 
 Near-term priorities:
-1. ~~document the real current operational state~~ (done: README rewrite + this doc)
-2. ~~provision the Python environment consistently~~ (done: single documented install command)
-3. ~~add a real deployment/service definition~~ (done: `deploy/launchpad.service`)
-4. replace mock calendar with real calendar integration
-5. implement the real e-ink display driver
-6. decide whether landscape mode is genuinely needed
-7. keep experimental features isolated behind flags
+1. deploy systemd units to the Pi and run continuously on real hardware
+2. replace mock calendar with real calendar integration
+3. implement landscape renderer
+4. replace mock World Cup with live data
+5. add real NBA / fantasy / baby integrations behind feature flags
+6. partial refresh support for the e-ink display
+7. deploy/update automation (script or CI-triggered)
+8. health-check/watchdog behaviour beyond systemd Restart=on-failure
 
 ## 18. Future ideas
 
