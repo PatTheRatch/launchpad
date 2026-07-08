@@ -3,13 +3,13 @@
     "orientation": "portrait",
     "width": 480,
     "height": 800,
-    "driver": "mock"
+    "driver": "eink"
   },
   "refresh": {
-    "refresh_seconds": 300
+    "refresh_seconds": 60
   },
   "features": {
-    "nba": false,
+    "nba": true,
     "fantasy_basketball": false,
     "baby_tracking": false,
     "world_cup": false

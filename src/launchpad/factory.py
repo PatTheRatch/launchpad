@@ -22,6 +22,7 @@ from launchpad.rendering.portrait import PortraitRenderer
 from launchpad.services.core.mock_calendar_service import MockCalendarService
 from launchpad.services.core.open_meteo_weather_service import OpenMeteoWeatherService
 from launchpad.services.core.tfl_train_service import MultiStationTrainService
+from launchpad.services.experimental.live_nba_service import LiveNbaService
 from launchpad.services.experimental.mock_world_cup_service import MockWorldCupService
 
 
@@ -57,6 +58,7 @@ def build_dashboard(settings: Settings) -> Dashboard:
     # Experimental services are registered only when their feature flag is on,
     # keeping them fully isolated from the core sections.
     experimental = ExperimentalServices(
+        nba=LiveNbaService() if settings.features.nba else None,
         world_cup=MockWorldCupService() if settings.features.world_cup else None,
     )
     renderer = build_renderer(settings)

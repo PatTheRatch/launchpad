@@ -15,10 +15,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw
 
 from launchpad.models.dashboard import DashboardState, Section, SectionState
+from launchpad.models.experimental.nba import GameStatus
 from launchpad.models.geometry import Orientation, Size
 from launchpad.models.result import Availability
 from launchpad.models.train import DepartureStatus
@@ -27,6 +29,45 @@ from launchpad.rendering.base import Renderer
 from launchpad.rendering.fonts import Font, load_font
 from launchpad.rendering.frame import Frame
 from launchpad.rendering.weather_icons import draw_weather_icon
+
+LONDON = ZoneInfo("Europe/London")
+
+#: NBA team abbreviation -> nickname, used to render a friendly opponent name
+#: (e.g. "vs Bulls") from the abbreviations the NBA service provides.
+_NBA_NICKNAMES: dict[str, str] = {
+    "ATL": "Hawks",
+    "BOS": "Celtics",
+    "BKN": "Nets",
+    "CHA": "Hornets",
+    "CHI": "Bulls",
+    "CLE": "Cavaliers",
+    "DAL": "Mavericks",
+    "DEN": "Nuggets",
+    "DET": "Pistons",
+    "GSW": "Warriors",
+    "HOU": "Rockets",
+    "IND": "Pacers",
+    "LAC": "Clippers",
+    "LAL": "Lakers",
+    "MEM": "Grizzlies",
+    "MIA": "Heat",
+    "MIL": "Bucks",
+    "MIN": "Timberwolves",
+    "NOP": "Pelicans",
+    "NYK": "Knicks",
+    "OKC": "Thunder",
+    "ORL": "Magic",
+    "PHI": "76ers",
+    "PHX": "Suns",
+    "POR": "Trail Blazers",
+    "SAC": "Kings",
+    "SAS": "Spurs",
+    "TOR": "Raptors",
+    "UTA": "Jazz",
+    "WAS": "Wizards",
+}
+
+_CAVS_ABBREVIATION = "CLE"
 
 # Pixel values for 1-bit images: 1 = white background, 0 = black ink.
 _WHITE = 1
@@ -215,6 +256,7 @@ class PortraitRenderer(Renderer):
             Section.CALENDAR: self._draw_calendar,
             Section.CALENDAR_TOMORROW: self._draw_calendar,
             Section.WEATHER: self._draw_weather,
+            Section.NBA: self._draw_nba,
             Section.WORLD_CUP: self._draw_world_cup,
         }
 
@@ -322,6 +364,38 @@ class PortraitRenderer(Renderer):
             # group_summary is the lowest-priority line; drop it once space runs out.
             if team.group_summary and not painter.exhausted:
                 painter.line(team.group_summary, painter.fonts.secondary)
+
+    @staticmethod
+    def _draw_nba(painter: _Painter, section: SectionState) -> None:
+        painter.line("CAVS", painter.fonts.title)
+
+        snapshot = section.data
+        game = snapshot.game if snapshot is not None else None
+        if section.availability is not Availability.PRESENT or game is None:
+            painter.line("No upcoming games", painter.fonts.secondary)
+            return
+
+        is_home = game.home_team == _CAVS_ABBREVIATION
+        opponent_abbr = game.away_team if is_home else game.home_team
+        opponent_name = _NBA_NICKNAMES.get(opponent_abbr, opponent_abbr)
+
+        if game.status is GameStatus.SCHEDULED:
+            painter.line(f"vs {opponent_name}", painter.fonts.primary)
+            tip_off_local = game.tip_off.astimezone(LONDON)
+            painter.line(f"{tip_off_local:%a %-I:%M %p}", painter.fonts.secondary)
+            painter.line("Upcoming", painter.fonts.title)
+            return
+
+        cavs_score = game.home_score if is_home else game.away_score
+        opponent_score = game.away_score if is_home else game.home_score
+        painter.line(
+            f"CLE {cavs_score} - {opponent_score} {opponent_abbr}",
+            painter.fonts.primary,
+        )
+        if game.status is GameStatus.LIVE:
+            painter.line("LIVE", painter.fonts.title)
+        else:
+            painter.line("Final", painter.fonts.title)
 
     @staticmethod
     def _draw_weather(painter: _Painter, section: SectionState) -> None:
