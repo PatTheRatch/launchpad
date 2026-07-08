@@ -54,12 +54,14 @@ MODE_SECTIONS: Mapping[DashboardMode, tuple[Section, ...]] = MappingProxyType(
             Section.TRAINS,
             Section.CALENDAR,
             Section.WEATHER,
+            Section.NBA,
             Section.WORLD_CUP,
         ),
         DashboardMode.DAYTIME: (
             Section.TRAINS,
             Section.CALENDAR,
             Section.WEATHER,
+            Section.NBA,
             Section.WORLD_CUP,
         ),
         DashboardMode.EVENING: (
