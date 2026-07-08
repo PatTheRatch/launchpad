@@ -36,7 +36,7 @@ Restart=on-failure
 RestartSec=30
 
 # Allow the process to access SPI and GPIO devices
-SupplementaryGroups=spi,gpio
+SupplementaryGroups=spi gpio
 
 [Install]
 WantedBy=multi-user.target
