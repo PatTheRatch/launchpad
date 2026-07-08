@@ -1,14 +1,17 @@
-"""Live Cavaliers game data via balldontlie.io + ESPN API (experimental).
+"""Live Cavaliers game data via static schedule + balldontlie.io + ESPN API.
 
-Primary source: balldontlie.io (regular season — schedules, scores).
-Fallback: ESPN public API (summer league, playoffs, any live game).
+During summer league (July), loads from a static schedule file
+(cavs_summer_league_2026.json) and checks ESPN for live scores.
+During the regular season, uses balldontlie.io as the primary source.
 """
 
 from __future__ import annotations
 
 import os
+import json
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,9 +22,80 @@ from launchpad.services.base import ServiceError
 from launchpad.services.experimental.nba_service import NbaService
 
 LONDON = ZoneInfo("Europe/London")
+EASTERN = ZoneInfo("US/Eastern")
 
 CAVS_TEAM_ID = 6
 CAVS_ABBREVIATION = "CLE"
+
+# ---------------------------------------------------------------------------
+# Summer league static schedule (July 2026)
+# ---------------------------------------------------------------------------
+
+_SUMMER_LEAGUE_FILE = "cavs_summer_league_2026.json"
+
+
+def _is_summer_league_window(now: datetime) -> bool:
+    return now.month == 7
+
+
+def _load_summer_league_schedule() -> list[dict[str, Any]]:
+    path = Path(_SUMMER_LEAGUE_FILE)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    return data.get("games") or []
+
+
+def _summer_league_game(now: datetime) -> NbaGame | None:
+    """Find today's or the next upcoming summer league game from the static schedule."""
+    games = _load_summer_league_schedule()
+    if not games:
+        return None
+
+    today_str = now.astimezone(LONDON).strftime("%Y-%m-%d")
+    best: NbaGame | None = None
+
+    for g in games:
+        date_str = g.get("date", "")
+        time_str = g.get("time_et", "19:00")
+        opp_abbr = g.get("opponent_abbr", "???")
+        opp_name = g.get("opponent", "Unknown")
+        home_away = g.get("home_away", "home")
+
+        try:
+            hour, minute = map(int, time_str.split(":"))
+            tip_off_et = datetime.strptime(date_str, "%Y-%m-%d").replace(
+                hour=hour, minute=minute, tzinfo=EASTERN
+            )
+        except (ValueError, TypeError):
+            tip_off_et = now
+
+        # Determine which team is home/away.
+        if home_away == "home":
+            home_team, away_team = CAVS_ABBREVIATION, opp_abbr
+        else:
+            home_team, away_team = opp_abbr, CAVS_ABBREVIATION
+
+        candidate = NbaGame(
+            home_team=home_team,
+            away_team=away_team,
+            tip_off=tip_off_et,
+            status=GameStatus.SCHEDULED,
+            home_score=None,
+            away_score=None,
+        )
+
+        if date_str == today_str:
+            return candidate  # today's game wins immediately
+
+        if tip_off_et > now:
+            if best is None or tip_off_et < best.tip_off:
+                best = candidate
+
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -239,10 +313,22 @@ class LiveNbaService(NbaService):
     def fetch(self) -> NbaSnapshot:
         now = self._clock()
 
-        # 1. Try balldontlie (regular season schedules + scores).
+        # 1. Summer league static schedule (July only).
+        if _is_summer_league_window(now):
+            sl_game = _summer_league_game(now)
+            if sl_game is not None:
+                # Check ESPN for live scores if the game is today.
+                today = now.astimezone(LONDON).date()
+                if sl_game.tip_off.astimezone(LONDON).date() == today:
+                    live = _fetch_espn_game(now, timeout_s=self._timeout_s)
+                    if live is not None:
+                        return NbaSnapshot(team="Cavaliers", game=live, retrieved_at=now)
+                return NbaSnapshot(team="Cavaliers", game=sl_game, retrieved_at=now)
+
+        # 2. Try balldontlie (regular season schedules + scores).
         game = self._fetch_balldontlie(now)
 
-        # 2. Fall back to ESPN for summer league / live games.
+        # 3. Fall back to ESPN for any live game.
         if game is None:
             game = _fetch_espn_game(now, timeout_s=self._timeout_s)
 
@@ -251,9 +337,7 @@ class LiveNbaService(NbaService):
     def _fetch_balldontlie(self, now: datetime) -> NbaGame | None:
         api_key = self._api_key if self._api_key is not None else os.getenv("BALLDONTLIE_API_KEY")
         if not api_key:
-            raise ServiceError(
-                "BALLDONTLIE_API_KEY is not set; cannot fetch Cavaliers game data."
-            )
+            return None
 
         client = self._client if self._client is not None else httpx.Client(timeout=self._timeout_s)
         owns_client = self._client is None

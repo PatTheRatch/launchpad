@@ -1,0 +1,34 @@
+{
+  "team": "Cavaliers",
+  "league": "NBA Summer League 2026 — Las Vegas",
+  "games": [
+    {
+      "date": "2026-07-10",
+      "time_et": "19:00",
+      "opponent": "Indiana Pacers",
+      "opponent_abbr": "IND",
+      "home_away": "home"
+    },
+    {
+      "date": "2026-07-12",
+      "time_et": "21:00",
+      "opponent": "Brooklyn Nets",
+      "opponent_abbr": "BKN",
+      "home_away": "away"
+    },
+    {
+      "date": "2026-07-14",
+      "time_et": "17:30",
+      "opponent": "Golden State Warriors",
+      "opponent_abbr": "GSW",
+      "home_away": "home"
+    },
+    {
+      "date": "2026-07-16",
+      "time_et": "19:00",
+      "opponent": "Orlando Magic",
+      "opponent_abbr": "ORL",
+      "home_away": "away"
+    }
+  ]
+}
