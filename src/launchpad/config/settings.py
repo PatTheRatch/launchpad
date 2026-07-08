@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
+from launchpad.config import config_store
 from launchpad.config.features import FeatureFlags
 from launchpad.models.dashboard import DashboardMode
 from launchpad.models.geometry import Orientation
@@ -131,10 +133,25 @@ def _load_dotenv() -> None:
 
 
 def load_settings() -> Settings:
-    """Load settings from the environment and optional ``.env`` file."""
+    """Load settings from config.json, the environment, and an optional ``.env`` file.
+
+    config.json (see :mod:`launchpad.config.config_store`) supplies the base
+    values; environment variables override them for backward compatibility.
+    When config.json is missing, :func:`~launchpad.config.config_store.load_config`
+    already returns the same hardcoded defaults used before it existed, so this
+    falls back to pure-env behaviour automatically.
+    """
     _load_dotenv()
 
-    orientation_value = os.getenv("LAUNCHPAD_DISPLAY_ORIENTATION", Orientation.PORTRAIT.value)
+    file_config = config_store.load_config()
+    display_defaults: dict[str, Any] = file_config.get("display", {})
+    refresh_defaults: dict[str, Any] = file_config.get("refresh", {})
+    feature_defaults: dict[str, Any] = file_config.get("features", {})
+
+    orientation_value = os.getenv(
+        "LAUNCHPAD_DISPLAY_ORIENTATION",
+        display_defaults.get("orientation", Orientation.PORTRAIT.value),
+    )
     try:
         orientation = Orientation(orientation_value)
     except ValueError as exc:
@@ -145,20 +162,31 @@ def load_settings() -> Settings:
     return Settings(
         display=DisplaySettings(
             orientation=orientation,
-            width=_env_int("LAUNCHPAD_DISPLAY_WIDTH", 480),
-            height=_env_int("LAUNCHPAD_DISPLAY_HEIGHT", 800),
-            driver=os.getenv("LAUNCHPAD_DISPLAY_DRIVER", "mock"),
+            width=_env_int("LAUNCHPAD_DISPLAY_WIDTH", display_defaults.get("width", 480)),
+            height=_env_int("LAUNCHPAD_DISPLAY_HEIGHT", display_defaults.get("height", 800)),
+            driver=os.getenv("LAUNCHPAD_DISPLAY_DRIVER", display_defaults.get("driver", "mock")),
         ),
         refresh=RefreshSettings(
-            refresh_seconds=_env_int("LAUNCHPAD_REFRESH_SECONDS", 300),
+            refresh_seconds=_env_int(
+                "LAUNCHPAD_REFRESH_SECONDS", refresh_defaults.get("refresh_seconds", 300)
+            ),
         ),
         features=FeatureFlags(
-            nba=_env_bool("LAUNCHPAD_FEATURE_NBA", False),
-            fantasy_basketball=_env_bool("LAUNCHPAD_FEATURE_FANTASY_BASKETBALL", False),
-            baby_tracking=_env_bool("LAUNCHPAD_FEATURE_BABY_TRACKING", False),
-            world_cup=_env_bool("LAUNCHPAD_FEATURE_WORLD_CUP", False),
+            nba=_env_bool("LAUNCHPAD_FEATURE_NBA", feature_defaults.get("nba", False)),
+            fantasy_basketball=_env_bool(
+                "LAUNCHPAD_FEATURE_FANTASY_BASKETBALL",
+                feature_defaults.get("fantasy_basketball", False),
+            ),
+            baby_tracking=_env_bool(
+                "LAUNCHPAD_FEATURE_BABY_TRACKING", feature_defaults.get("baby_tracking", False)
+            ),
+            world_cup=_env_bool(
+                "LAUNCHPAD_FEATURE_WORLD_CUP", feature_defaults.get("world_cup", False)
+            ),
         ),
-        force_mode=_parse_force_mode(os.getenv("LAUNCHPAD_FORCE_MODE")),
+        force_mode=_parse_force_mode(
+            os.getenv("LAUNCHPAD_FORCE_MODE", file_config.get("force_mode"))
+        ),
     )
 
 

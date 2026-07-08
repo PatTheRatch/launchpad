@@ -1,0 +1,18 @@
+{
+  "display": {
+    "orientation": "portrait",
+    "width": 480,
+    "height": 800,
+    "driver": "mock"
+  },
+  "refresh": {
+    "refresh_seconds": 300
+  },
+  "features": {
+    "nba": false,
+    "fantasy_basketball": false,
+    "baby_tracking": false,
+    "world_cup": false
+  },
+  "force_mode": null
+}
