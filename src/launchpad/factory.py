@@ -65,8 +65,8 @@ def build_baby_service(settings: Settings) -> BabyService | None:
     return HuckleberryBabyService(email=email, password=password)
 
 
-def build_dashboard(settings: Settings) -> Dashboard:
-    """Wire settings, services, renderer, and display into a Dashboard."""
+def build_services(settings: Settings) -> tuple[CoreServices, ExperimentalServices]:
+    """Wire the core and (flag-gated) experimental data services."""
     app_key = os.getenv("TFL_APP_KEY") or None
     core = CoreServices(
         trains=MultiStationTrainService(DEFAULT_STATIONS, app_key=app_key),
@@ -80,6 +80,12 @@ def build_dashboard(settings: Settings) -> Dashboard:
         baby=build_baby_service(settings),
         world_cup=MockWorldCupService() if settings.features.world_cup else None,
     )
+    return core, experimental
+
+
+def build_dashboard(settings: Settings) -> Dashboard:
+    """Wire settings, services, renderer, and display into a Dashboard."""
+    core, experimental = build_services(settings)
     renderer = build_renderer(settings)
     display = build_display(settings)
     return Dashboard(settings, core, renderer, display, experimental)

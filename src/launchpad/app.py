@@ -80,15 +80,14 @@ class Dashboard:
         # live timestamp each cycle instead of a value frozen at construction.
         self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(LONDON))
 
-    def collect(self) -> DashboardState:
-        """Gather data from all active services into a single state.
+    def collect_inputs(self) -> DashboardInputs:
+        """Fetch from all active services, wrapping every outcome in a Result.
 
-        Every service call is wrapped into a :class:`Result`; the builder gates
-        experimental sections by flag, mode, and presence, so no feature-flag
-        checks are needed here.
+        Exposed separately from :meth:`collect` so other frontends (e.g. the
+        config server's live preview) can reuse one round of service calls to
+        build states for several modes.
         """
-        now = self._clock()
-        inputs = DashboardInputs(
+        return DashboardInputs(
             train=self._collect_trains(),
             weather=self._fetch_result(self._core.weather),
             calendar=self._collect_calendar(),
@@ -97,8 +96,17 @@ class Dashboard:
             baby=self._optional_result(self._experimental.baby),
             world_cup=self._optional_result(self._experimental.world_cup),
         )
+
+    def collect(self) -> DashboardState:
+        """Gather data from all active services into a single state.
+
+        Every service call is wrapped into a :class:`Result`; the builder gates
+        experimental sections by flag, mode, and presence, so no feature-flag
+        checks are needed here.
+        """
+        now = self._clock()
         return DashboardStateBuilder().build(
-            now, inputs, self._settings.features, self._settings.force_mode
+            now, self.collect_inputs(), self._settings.features, self._settings.force_mode
         )
 
     def refresh_once(self) -> None:

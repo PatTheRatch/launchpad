@@ -2,9 +2,10 @@
 
 Runs as a separate process from the dashboard itself (see
 ``launchpad.config_server.__main__``), so restarting or reloading this server
-never touches the running dashboard loop. It only reads and writes
-``config.json`` via :mod:`launchpad.config.config_store` — it has no
-dependency on the dashboard's rendering, services, or builder.
+never touches the running dashboard loop. Configuration reads/writes go
+through :mod:`launchpad.config.config_store`; the live preview endpoint
+additionally renders dashboard frames in-process (see
+:mod:`launchpad.config_server.preview`) — browser-only, never the panel.
 """
 
 from __future__ import annotations
@@ -47,6 +48,34 @@ def post_config() -> tuple[Response, int] | Response:
 
     config_store.save_config(config)
     return jsonify({"status": "ok", "config": config})
+
+
+@app.get("/api/preview/<mode>.png")
+def get_preview(mode: str) -> tuple[Response, int] | Response:
+    """Render a live dashboard preview for a mode ("auto" or a real mode).
+
+    ``?refresh=1`` forces a fresh round of service data instead of the cache.
+    """
+    from launchpad.config_server import preview as preview_module
+
+    try:
+        frame = preview_module.shared_preview().render_png(
+            mode, refresh="refresh" in request.args
+        )
+    except preview_module.PreviewError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+    except Exception as exc:
+        # A preview failure (e.g. missing render extra) must never take the
+        # config UI down with it.
+        return jsonify({"status": "error", "message": f"Preview failed: {exc}"}), 500
+
+    response = Response(frame.png, mimetype="image/png")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Launchpad-Mode"] = frame.mode
+    response.headers["X-Launchpad-Fetched-At"] = frame.fetched_at.isoformat(
+        timespec="seconds"
+    )
+    return response
 
 
 @app.post("/api/restart")
