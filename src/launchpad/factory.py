@@ -22,6 +22,8 @@ from launchpad.rendering.portrait import PortraitRenderer
 from launchpad.services.core.mock_calendar_service import MockCalendarService
 from launchpad.services.core.open_meteo_weather_service import OpenMeteoWeatherService
 from launchpad.services.core.tfl_train_service import MultiStationTrainService
+from launchpad.services.experimental.baby_service import BabyService
+from launchpad.services.experimental.huckleberry_baby_service import HuckleberryBabyService
 from launchpad.services.experimental.live_nba_service import LiveNbaService
 from launchpad.services.experimental.mock_world_cup_service import MockWorldCupService
 
@@ -47,6 +49,22 @@ def build_display(settings: Settings) -> Display:
     raise ValueError(f"Unknown display driver: {driver!r}")
 
 
+def build_baby_service(settings: Settings) -> BabyService | None:
+    """Huckleberry feed service, when enabled and credentials are configured.
+
+    Missing credentials return ``None`` instead of raising: the enabled baby
+    section then renders its "Feeds unavailable" placeholder, so the
+    misconfiguration is visible on the panel without taking down the dashboard.
+    """
+    if not settings.features.baby_tracking:
+        return None
+    email = (os.getenv("HUCKLEBERRY_EMAIL") or "").strip()
+    password = (os.getenv("HUCKLEBERRY_PASSWORD") or "").strip()
+    if not email or not password:
+        return None
+    return HuckleberryBabyService(email=email, password=password)
+
+
 def build_dashboard(settings: Settings) -> Dashboard:
     """Wire settings, services, renderer, and display into a Dashboard."""
     app_key = os.getenv("TFL_APP_KEY") or None
@@ -59,6 +77,7 @@ def build_dashboard(settings: Settings) -> Dashboard:
     # keeping them fully isolated from the core sections.
     experimental = ExperimentalServices(
         nba=LiveNbaService() if settings.features.nba else None,
+        baby=build_baby_service(settings),
         world_cup=MockWorldCupService() if settings.features.world_cup else None,
     )
     renderer = build_renderer(settings)

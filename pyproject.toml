@@ -39,6 +39,11 @@ dev = [
 web = [             # configuration web UI (Flask)
     "flask>=3.0",
 ]
+baby = [            # Huckleberry "last feed" section
+    # Pinned: 0.2.3+ requires Python 3.14; the Pi runs 3.13. Do not upgrade
+    # until the Pi's Python does.
+    "huckleberry-api==0.2.2",
+]
 
 [project.scripts]
 launchpad = "launchpad.__main__:main"
@@ -56,7 +61,18 @@ src = ["src", "tests"]
 target-version = "py313"
 line-length = 100
 
+[tool.ruff.lint]
+# Pin the historical default rule set so newer ruff releases (whose defaults
+# grew much broader) don't change what "clean" means for this repo.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.mypy]
 python_version = "3.13"
 strict = true
 mypy_path = "src"
+
+# The Huckleberry client is an optional extra and the Waveshare driver is
+# Pi-only/untyped; keep `mypy src` clean on machines without them installed.
+[[tool.mypy.overrides]]
+module = ["huckleberry_api.*", "waveshare_epd.*"]
+ignore_missing_imports = true

@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw
 
 from launchpad.models.dashboard import DashboardState, Section, SectionState
+from launchpad.models.experimental.baby import Feed, FeedType
 from launchpad.models.experimental.nba import GameStatus
 from launchpad.models.geometry import Orientation, Size
 from launchpad.models.result import Availability
@@ -257,6 +258,11 @@ class PortraitRenderer(Renderer):
             Section.CALENDAR_TOMORROW: self._draw_calendar,
             Section.WEATHER: self._draw_weather,
             Section.NBA: self._draw_nba,
+            # "How long ago" is measured against the frame's own timestamp so
+            # the renderer stays a pure function of the state.
+            Section.BABY: lambda painter, section: self._draw_baby(
+                painter, section, state.generated_at
+            ),
             Section.WORLD_CUP: self._draw_world_cup,
         }
 
@@ -398,6 +404,25 @@ class PortraitRenderer(Renderer):
             painter.line("Final", painter.fonts.title)
 
     @staticmethod
+    def _draw_baby(painter: _Painter, section: SectionState, now: datetime) -> None:
+        snapshot = section.data
+        if section.availability is Availability.UNAVAILABLE or snapshot is None:
+            painter.line("Last feed", painter.fonts.title)
+            painter.line("Feeds unavailable", painter.fonts.secondary)
+            return
+
+        feed = snapshot.last_feed
+        if feed is None:
+            painter.line("Last feed", painter.fonts.title)
+            painter.line("No feeds logged yet", painter.fonts.secondary)
+            return
+
+        ended_local = feed.ended_at.astimezone(LONDON)
+        painter.title_with_status("Last feed", f"{ended_local:%-I:%M%p}".lower())
+        painter.line(_elapsed_text(now - feed.ended_at), painter.fonts.primary)
+        painter.line(_feed_detail(feed), painter.fonts.secondary)
+
+    @staticmethod
     def _draw_weather(painter: _Painter, section: SectionState) -> None:
         report = section.data
         title = report.location if report is not None else "Weather"
@@ -460,6 +485,41 @@ class PortraitRenderer(Renderer):
         )
         if hint:
             painter.line(hint, painter.fonts.secondary)
+
+
+#: Compact display labels for each feed type.
+_FEED_TYPE_LABELS: dict[FeedType, str] = {
+    FeedType.BREAST: "Breast",
+    FeedType.BOTTLE: "Bottle",
+    FeedType.FORMULA: "Formula",
+}
+
+
+def _elapsed_text(elapsed: timedelta) -> str:
+    """Humanize the time since the feed ended ("5m ago", "1h 20m ago")."""
+    minutes = int(elapsed.total_seconds() // 60)
+    if minutes < 1:
+        return "Just now"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 1:
+        return f"{minutes}m ago"
+    days, hours = divmod(hours, 24)
+    if days < 1:
+        return f"{hours}h {minutes}m ago" if minutes else f"{hours}h ago"
+    return f"{days}d {hours}h ago" if hours else f"{days}d ago"
+
+
+def _feed_detail(feed: Feed) -> str:
+    """One compact line: "Formula · 80ml" or "Breast · right · 6m"."""
+    parts = [_FEED_TYPE_LABELS[feed.feed_type]]
+    if feed.feed_type is FeedType.BREAST:
+        if feed.side:
+            parts.append(feed.side)
+        if feed.duration_seconds:
+            parts.append(f"{round(feed.duration_seconds / 60)}m")
+    elif feed.amount_ml is not None:
+        parts.append(f"{round(feed.amount_ml)}ml")
+    return " · ".join(parts)
 
 
 def _condition_text(condition: WeatherCondition) -> str:

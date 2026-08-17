@@ -23,6 +23,7 @@ from launchpad.models.train import (
     TrainBoard,
     TrainDeparture,
 )
+from launchpad.models.experimental.baby import BabySnapshot, Feed, FeedType
 from launchpad.models.experimental.world_cup import (
     WorldCupTeamWatch,
     WorldCupWatchlist,
@@ -157,14 +158,30 @@ def build_mock_world_cup_watchlist() -> WorldCupWatchlist:
     )
 
 
+def build_mock_baby_snapshot() -> BabySnapshot:
+    """Deterministic last feed (formula bottle finished 06:55) for previews."""
+    return BabySnapshot(
+        last_feed=Feed(
+            feed_type=FeedType.FORMULA,
+            started_at=_at(6, 55),
+            ended_at=_at(6, 55),
+            amount_ml=80.0,
+        ),
+        retrieved_at=PREVIEW_NOW,
+    )
+
+
 def build_mock_state() -> DashboardState:
     """Build a MORNING dashboard state via the real builder."""
     inputs = DashboardInputs(
         train=Result.present(build_mock_station_arrivals()),
         calendar=Result.present(build_mock_agenda()),
         weather=Result.present(build_mock_weather()),
+        baby=Result.present(build_mock_baby_snapshot()),
     )
-    return DashboardStateBuilder().build(PREVIEW_NOW, inputs, FeatureFlags())
+    return DashboardStateBuilder().build(
+        PREVIEW_NOW, inputs, FeatureFlags(baby_tracking=True)
+    )
 
 
 def render_preview() -> Frame:

@@ -30,7 +30,7 @@ from launchpad.models.experimental.baby import BabySnapshot
 from launchpad.models.experimental.fantasy import FantasySnapshot
 from launchpad.models.experimental.nba import NbaSnapshot
 from launchpad.models.experimental.world_cup import WorldCupWatchlist
-from launchpad.models.result import Availability, Result
+from launchpad.models.result import Result
 from launchpad.models.train import StationArrivals
 from launchpad.models.weather import WeatherReport
 
@@ -52,6 +52,7 @@ MODE_SECTIONS: Mapping[DashboardMode, tuple[Section, ...]] = MappingProxyType(
     {
         DashboardMode.MORNING: (
             Section.TRAINS,
+            Section.BABY,
             Section.CALENDAR,
             Section.WEATHER,
             Section.NBA,
@@ -59,6 +60,7 @@ MODE_SECTIONS: Mapping[DashboardMode, tuple[Section, ...]] = MappingProxyType(
         ),
         DashboardMode.DAYTIME: (
             Section.TRAINS,
+            Section.BABY,
             Section.CALENDAR,
             Section.WEATHER,
             Section.NBA,
@@ -66,12 +68,16 @@ MODE_SECTIONS: Mapping[DashboardMode, tuple[Section, ...]] = MappingProxyType(
         ),
         DashboardMode.EVENING: (
             Section.CALENDAR_TOMORROW,
+            Section.BABY,
             Section.NBA,
             Section.FANTASY,
-            Section.BABY,
             Section.WORLD_CUP,
         ),
-        DashboardMode.OVERNIGHT: (Section.WEATHER, Section.CALENDAR_TOMORROW),
+        DashboardMode.OVERNIGHT: (
+            Section.WEATHER,
+            Section.BABY,
+            Section.CALENDAR_TOMORROW,
+        ),
     }
 )
 
@@ -98,6 +104,12 @@ EXPERIMENTAL_FLAG: Mapping[Section, str] = MappingProxyType(
         Section.WORLD_CUP: "world_cup",
     }
 )
+
+#: Enabled experimental sections that stay visible even when their data is
+#: unavailable. Most experimental sections vanish silently on failure, but a
+#: newborn's feed section is relied on around the clock — it renders an
+#: explicit placeholder instead of quietly disappearing.
+ALWAYS_VISIBLE_WHEN_ENABLED: frozenset[Section] = frozenset({Section.BABY})
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,14 +223,17 @@ class DashboardStateBuilder:
         # Experimental sections appear only when their flag is enabled, the
         # current mode wants them (guaranteed by the caller iterating
         # MODE_SECTIONS), and their data is actually present. Otherwise they
-        # are silently omitted.
+        # are silently omitted — except ALWAYS_VISIBLE_WHEN_ENABLED sections,
+        # which surface an unavailable state for the renderer's placeholder.
         enabled = bool(getattr(flags, EXPERIMENTAL_FLAG[section]))
-        if enabled and result.is_present:
+        if not enabled:
+            return None
+        if result.is_present or section in ALWAYS_VISIBLE_WHEN_ENABLED:
             return SectionState(
                 section=section,
                 category=SectionCategory.EXPERIMENTAL,
                 visible=True,
-                availability=Availability.PRESENT,
-                data=result.value,
+                availability=result.availability,
+                data=None if result.is_unavailable else result.value,
             )
         return None

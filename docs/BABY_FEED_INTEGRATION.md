@@ -1,7 +1,19 @@
 # Baby Feed Integration (Huckleberry)
 
-> Status: **Proposed — not yet implemented.** This document is the hand-off spec
-> for adding a live "last feed" section to the Launchpad dashboard.
+> Status: **Implemented (2026-08-17).** This document was the hand-off spec for
+> adding a live "last feed" section to the Launchpad dashboard; it is kept as
+> background research. Where the implementation deviates:
+>
+> * The generic `BabyEvent` model was removed outright (sleep/diaper were
+>   unused); `models/experimental/baby.py` now holds `Feed`/`FeedType` only.
+> * The concrete service lives in its own module,
+>   `services/experimental/huckleberry_baby_service.py` (matching the
+>   `live_nba_service.py` pattern), with the pure interval→`Feed` mapping
+>   exposed for tests. `mode="solids"` rows are ignored.
+> * When enabled but unavailable (failure *or* missing credentials), the
+>   section renders a "Feeds unavailable" placeholder instead of vanishing —
+>   see `ALWAYS_VISIBLE_WHEN_ENABLED` in `builder.py`. Missing credentials
+>   therefore surface on the panel rather than crashing at startup.
 >
 > Author: AIsha · Date: 2026-08-17
 

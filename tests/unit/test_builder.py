@@ -156,27 +156,38 @@ def test_mode_uses_london_for_arbitrary_input_zone() -> None:
 def test_mode_sections_table_matches_vision() -> None:
     assert MODE_SECTIONS[DashboardMode.MORNING] == (
         Section.TRAINS,
+        Section.BABY,
         Section.CALENDAR,
         Section.WEATHER,
+        Section.NBA,
         Section.WORLD_CUP,
     )
     assert MODE_SECTIONS[DashboardMode.DAYTIME] == (
         Section.TRAINS,
+        Section.BABY,
         Section.CALENDAR,
         Section.WEATHER,
+        Section.NBA,
         Section.WORLD_CUP,
     )
     assert MODE_SECTIONS[DashboardMode.EVENING] == (
         Section.CALENDAR_TOMORROW,
+        Section.BABY,
         Section.NBA,
         Section.FANTASY,
-        Section.BABY,
         Section.WORLD_CUP,
     )
     assert MODE_SECTIONS[DashboardMode.OVERNIGHT] == (
         Section.WEATHER,
+        Section.BABY,
         Section.CALENDAR_TOMORROW,
     )
+
+
+def test_baby_section_appears_in_every_mode() -> None:
+    # A newborn feeds around the clock; the feed section is never off-shift.
+    for mode in DashboardMode:
+        assert Section.BABY in MODE_SECTIONS[mode]
 
 
 def test_build_sets_mode_and_generated_at(builder: DashboardStateBuilder) -> None:
@@ -283,14 +294,14 @@ def test_experimental_nba_only_when_flag_and_present(
 def test_experimental_omitted_when_mode_does_not_want_it(
     builder: DashboardStateBuilder,
 ) -> None:
-    # Morning does not include NBA, even when enabled and present.
+    # Morning does not include fantasy, even when enabled and present.
     now = london(2026, 6, 15, 8, 0)
-    flags = FeatureFlags(nba=True)
+    flags = FeatureFlags(fantasy_basketball=True)
     state = builder.build(
-        now, DashboardInputs(nba=Result.present(an_nba_snapshot())), flags
+        now, DashboardInputs(fantasy=Result.present(a_fantasy_snapshot())), flags
     )
 
-    assert state.get(Section.NBA) is None
+    assert state.get(Section.FANTASY) is None
 
 
 def test_experimental_flag_mapping_for_all_features(
@@ -327,6 +338,35 @@ def test_experimental_each_flag_independently_gates_its_section(
 
     assert state.get(Section.NBA) is None
     assert state.is_visible(Section.FANTASY)
+    assert state.get(Section.BABY) is None
+
+
+def test_enabled_baby_section_shows_placeholder_when_unavailable(
+    builder: DashboardStateBuilder,
+) -> None:
+    # Unlike other experimental sections, an enabled feed section must not
+    # vanish on failure: it surfaces an unavailable state for the renderer's
+    # "Feeds unavailable" placeholder.
+    now = london(2026, 6, 15, 2, 0)  # Overnight includes baby too.
+    flags = FeatureFlags(baby_tracking=True)
+
+    state = builder.build(now, DashboardInputs(baby=Result.unavailable()), flags)
+
+    section = state.get(Section.BABY)
+    assert section is not None
+    assert section.visible is True
+    assert section.availability is Availability.UNAVAILABLE
+    assert section.data is None
+
+
+def test_disabled_baby_section_is_omitted_even_when_unavailable(
+    builder: DashboardStateBuilder,
+) -> None:
+    now = london(2026, 6, 15, 2, 0)
+    state = builder.build(
+        now, DashboardInputs(baby=Result.unavailable()), FeatureFlags(baby_tracking=False)
+    )
+
     assert state.get(Section.BABY) is None
 
 
