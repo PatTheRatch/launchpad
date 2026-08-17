@@ -101,13 +101,11 @@ class HuckleberryBabyService(BabyService):
         self,
         email: str,
         password: str,
-        timezone: str = "Europe/London",
         lookback_days: int = 7,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._email = email
         self._password = password
-        self._timezone = timezone
         self._lookback_days = lookback_days
         self._clock = clock or (lambda: datetime.now(LONDON))
 
@@ -120,13 +118,24 @@ class HuckleberryBabyService(BabyService):
             raise ServiceError("Huckleberry credentials are not configured.")
         try:
             intervals = asyncio.run(self._list_recent_intervals())
+            last = latest_feed(intervals)
         except ServiceError:
             raise
         except Exception as exc:
             # Unofficial API: auth, network, and parse failures are all equally
-            # expected — every one degrades to an unavailable section.
+            # expected — every one degrades to an unavailable section. Mapping
+            # stays inside this boundary too, so a pathological interval value
+            # can never escape as a non-ServiceError and kill the dashboard.
             raise ServiceError("Huckleberry feed retrieval failed.") from exc
-        return BabySnapshot(last_feed=latest_feed(intervals), retrieved_at=self._clock())
+        if last is None:
+            # The library swallows Firestore/validation errors and returns an
+            # empty or partial list (huckleberry-api 0.2.2). A newborn's
+            # lookback window always contains milk feeds, so "no feeds" is far
+            # more likely an upstream failure than the truth — surface the
+            # honest "Feeds unavailable" placeholder rather than a misleading
+            # "No feeds logged yet".
+            raise ServiceError("No feed intervals in the lookback window.")
+        return BabySnapshot(last_feed=last, retrieved_at=self._clock())
 
     async def _list_recent_intervals(self) -> list[Any]:
         import aiohttp
@@ -135,7 +144,7 @@ class HuckleberryBabyService(BabyService):
         now = int(self._clock().timestamp())
         start = now - self._lookback_days * 86400
         async with aiohttp.ClientSession() as session:
-            api = HuckleberryAPI(self._email, self._password, self._timezone, session)
+            api = HuckleberryAPI(self._email, self._password, LONDON.key, session)
             await api.authenticate()
             user = await api.get_user()
             if user is None or not user.childList:
