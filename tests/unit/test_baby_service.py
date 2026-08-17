@@ -204,11 +204,27 @@ def test_fetch_returns_snapshot_with_latest_feed() -> None:
     assert snapshot.retrieved_at == FIXED_NOW
 
 
-def test_fetch_with_no_intervals_returns_feedless_snapshot() -> None:
-    snapshot = FakeHuckleberryBabyService(intervals=[]).fetch()
+def test_fetch_with_no_mappable_feeds_raises_service_error() -> None:
+    # huckleberry-api 0.2.2 swallows Firestore errors into an empty/partial
+    # list; a newborn's lookback window always has milk feeds, so an empty
+    # window is treated as a backend failure ("Feeds unavailable"), never as
+    # a valid "No feeds logged yet".
+    with pytest.raises(ServiceError):
+        FakeHuckleberryBabyService(intervals=[]).fetch()
 
-    assert snapshot.last_feed is None
-    assert snapshot.retrieved_at == FIXED_NOW
+    solids_only = [SimpleNamespace(mode="solids", start=START_TS)]
+    with pytest.raises(ServiceError):
+        FakeHuckleberryBabyService(intervals=solids_only).fetch()
+
+
+def test_fetch_wraps_mapping_errors_in_service_error() -> None:
+    # A schema-valid but pathological row must degrade to unavailable, not
+    # escape fetch() and crash the dashboard loop (start + 1e30 seconds
+    # overflows timedelta during mapping).
+    corrupt = breast_interval(left=1e30, right=0.0)
+
+    with pytest.raises(ServiceError):
+        FakeHuckleberryBabyService(intervals=[corrupt]).fetch()
 
 
 def test_fetch_wraps_unexpected_errors_in_service_error() -> None:

@@ -15,6 +15,39 @@
 
     <div id="status" class="status" role="status" aria-live="polite"></div>
 
+    <section class="card preview-card">
+      <h2>Live Preview</h2>
+      <p class="card-hint">
+        Rendered on demand from the saved configuration with live data.
+        Cycling happens in the browser only — the panel is untouched.
+      </p>
+
+      <div class="preview-body">
+        <div id="preview-panel" class="preview-panel">
+          <img id="preview-img" alt="Rendered dashboard preview">
+          <div class="preview-loading" aria-hidden="true">Rendering…</div>
+        </div>
+
+        <div class="preview-side">
+          <div class="mode-tabs" role="tablist" aria-label="Preview mode">
+            <button type="button" class="mode-tab" data-mode="auto">Auto</button>
+            <button type="button" class="mode-tab" data-mode="morning">Morning</button>
+            <button type="button" class="mode-tab" data-mode="daytime">Daytime</button>
+            <button type="button" class="mode-tab" data-mode="evening">Evening</button>
+            <button type="button" class="mode-tab" data-mode="overnight">Overnight</button>
+          </div>
+
+          <div class="preview-actions">
+            <button type="button" id="cycle-btn" class="btn btn-secondary">▶ Cycle modes</button>
+            <button type="button" id="preview-refresh" class="btn btn-secondary">Refetch data</button>
+            <button type="button" id="apply-mode-btn" class="btn btn-secondary">Send this view to the panel</button>
+          </div>
+
+          <p id="preview-meta" class="preview-meta"></p>
+        </div>
+      </div>
+    </section>
+
     <form id="config-form">
       <section class="card">
         <h2>Display</h2>

@@ -14,6 +14,10 @@
 >   section renders a "Feeds unavailable" placeholder instead of vanishing —
 >   see `ALWAYS_VISIBLE_WHEN_ENABLED` in `builder.py`. Missing credentials
 >   therefore surface on the panel rather than crashing at startup.
+> * An empty lookback window is treated as `ServiceError` (unavailable), not
+>   as a feed-less snapshot: the 0.2.2 library swallows Firestore errors into
+>   an empty list, and a newborn's 7-day window always has milk feeds, so
+>   "no feeds" is far more likely a backend failure than the truth.
 >
 > Author: AIsha · Date: 2026-08-17
 

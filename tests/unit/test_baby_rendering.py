@@ -101,3 +101,13 @@ def test_feed_detail_omits_missing_fields() -> None:
     when = OVERNIGHT
     assert _feed_detail(Feed(FeedType.FORMULA, when, when)) == "Formula"
     assert _feed_detail(Feed(FeedType.BREAST, when, when)) == "Breast"
+
+
+def test_feed_detail_never_shows_zero_minutes() -> None:
+    # A 25-second comfort latch rounds up to 1m, not down to a nonsense 0m.
+    when = OVERNIGHT
+    brief = Feed(
+        FeedType.BREAST, when, when + timedelta(seconds=25), side="left", duration_seconds=25.0
+    )
+
+    assert _feed_detail(brief) == "Breast · left · 1m"

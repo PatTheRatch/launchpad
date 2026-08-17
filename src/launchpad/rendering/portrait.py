@@ -516,7 +516,8 @@ def _feed_detail(feed: Feed) -> str:
         if feed.side:
             parts.append(feed.side)
         if feed.duration_seconds:
-            parts.append(f"{round(feed.duration_seconds / 60)}m")
+            # Never show a nonsense "0m" for a sub-30-second latch.
+            parts.append(f"{max(1, round(feed.duration_seconds / 60))}m")
     elif feed.amount_ml is not None:
         parts.append(f"{round(feed.amount_ml)}ml")
     return " · ".join(parts)
