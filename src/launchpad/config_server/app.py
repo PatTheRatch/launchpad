@@ -17,7 +17,7 @@ from flask import Flask, Response, jsonify, render_template, request
 
 from launchpad.config import config_store
 from launchpad.models.dashboard import DashboardMode
-from launchpad.models.geometry import Orientation
+from launchpad.models.geometry import Layout, Orientation
 
 app = Flask(__name__)
 
@@ -54,13 +54,16 @@ def post_config() -> tuple[Response, int] | Response:
 def get_preview(mode: str) -> tuple[Response, int] | Response:
     """Render a live dashboard preview for a mode ("auto" or a real mode).
 
-    ``?refresh=1`` forces a fresh round of service data instead of the cache.
+    ``?layout=`` overrides the saved layout for this render only; ``?refresh=1``
+    forces a fresh round of service data instead of the cache.
     """
     from launchpad.config_server import preview as preview_module
 
     try:
         frame = preview_module.shared_preview().render_png(
-            mode, refresh="refresh" in request.args
+            mode,
+            refresh="refresh" in request.args,
+            layout_name=request.args.get("layout"),
         )
     except preview_module.PreviewError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 404
@@ -72,6 +75,7 @@ def get_preview(mode: str) -> tuple[Response, int] | Response:
     response = Response(frame.png, mimetype="image/png")
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Launchpad-Mode"] = frame.mode
+    response.headers["X-Launchpad-Layout"] = frame.layout
     response.headers["X-Launchpad-Fetched-At"] = frame.fetched_at.isoformat(
         timespec="seconds"
     )
@@ -121,6 +125,12 @@ def _validate_config(payload: Any) -> dict[str, Any]:
     if driver not in _DRIVERS:
         raise ValueError("'display.driver' must be 'mock' or 'eink'.")
 
+    # Older config.json files predate layouts; default rather than reject.
+    layout = display.get("layout", Layout.CLASSIC.value)
+    if layout not in {item.value for item in Layout}:
+        valid = ", ".join(sorted(item.value for item in Layout))
+        raise ValueError(f"'display.layout' must be one of: {valid}.")
+
     width = display.get("width")
     if not _is_positive_int(width):
         raise ValueError("'display.width' must be a positive integer.")
@@ -161,6 +171,7 @@ def _validate_config(payload: Any) -> dict[str, Any]:
             "width": width,
             "height": height,
             "driver": driver,
+            "layout": layout,
         },
         "refresh": {"refresh_seconds": refresh_seconds},
         "features": validated_features,

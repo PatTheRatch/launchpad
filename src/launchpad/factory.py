@@ -15,9 +15,16 @@ from launchpad.config.settings import DEFAULT_STATIONS, LONDON_WEATHER, Settings
 from launchpad.display.base import Display
 from launchpad.display.eink_display import EinkDisplay
 from launchpad.display.mock_display import MockDisplay
-from launchpad.models.geometry import Orientation, Size
+from launchpad.models.geometry import Layout, Orientation, Size
 from launchpad.rendering.base import Renderer
 from launchpad.rendering.landscape import LandscapeRenderer
+from launchpad.rendering.layouts import (
+    CardsRenderer,
+    CompactRenderer,
+    HeroRenderer,
+    SlotsRenderer,
+    TimelineRenderer,
+)
 from launchpad.rendering.portrait import PortraitRenderer
 from launchpad.services.core.mock_calendar_service import MockCalendarService
 from launchpad.services.core.open_meteo_weather_service import OpenMeteoWeatherService
@@ -28,11 +35,27 @@ from launchpad.services.experimental.live_nba_service import LiveNbaService
 from launchpad.services.experimental.mock_world_cup_service import MockWorldCupService
 
 
+#: Portrait layout -> renderer. Every entry draws the same content in a
+#: different arrangement; see :mod:`launchpad.rendering.layouts`.
+PORTRAIT_LAYOUTS: dict[Layout, type[Renderer]] = {
+    Layout.CLASSIC: PortraitRenderer,
+    Layout.COMPACT: CompactRenderer,
+    Layout.HERO: HeroRenderer,
+    Layout.SLOTS: SlotsRenderer,
+    Layout.CARDS: CardsRenderer,
+    Layout.TIMELINE: TimelineRenderer,
+}
+
+
 def build_renderer(settings: Settings) -> Renderer:
-    """Select a renderer based on the configured orientation."""
+    """Select a renderer based on the configured orientation and layout."""
     orientation = settings.display.orientation
     if orientation is Orientation.PORTRAIT:
-        return PortraitRenderer()
+        layout = settings.display.layout
+        try:
+            return PORTRAIT_LAYOUTS[layout]()
+        except KeyError as exc:
+            raise ValueError(f"Unknown display layout: {layout!r}") from exc
     if orientation is Orientation.LANDSCAPE:
         return LandscapeRenderer()
     raise ValueError(f"Unknown display orientation: {orientation!r}")

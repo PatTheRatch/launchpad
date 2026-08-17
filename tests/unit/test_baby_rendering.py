@@ -12,7 +12,9 @@ from launchpad.config.features import FeatureFlags
 from launchpad.models.experimental.baby import BabySnapshot, Feed, FeedType
 from launchpad.models.result import Result
 from launchpad.preview import PORTRAIT_SIZE, build_mock_baby_snapshot
-from launchpad.rendering.portrait import PortraitRenderer, _elapsed_text, _feed_detail
+from launchpad.rendering.portrait import PortraitRenderer
+from launchpad.rendering.summaries import elapsed_text as _elapsed_text
+from launchpad.rendering.summaries import feed_detail as _feed_detail
 
 LONDON = ZoneInfo("Europe/London")
 OVERNIGHT = datetime(2026, 6, 15, 3, 0, tzinfo=LONDON)

@@ -288,13 +288,18 @@ select:focus {
   min-width: 0;
 }
 
-.mode-tabs {
+.chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.mode-tab {
+.layout-label {
+  margin-top: 14px;
+}
+
+.mode-tab,
+.layout-tab {
   padding: 8px 12px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
@@ -304,11 +309,13 @@ select:focus {
   cursor: pointer;
 }
 
-.mode-tab:hover {
+.mode-tab:hover,
+.layout-tab:hover {
   border-color: var(--accent);
 }
 
-.mode-tab.active {
+.mode-tab.active,
+.layout-tab.active {
   background: rgba(79, 140, 255, 0.15);
   border-color: var(--accent);
   color: var(--accent);
