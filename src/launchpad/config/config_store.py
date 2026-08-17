@@ -18,7 +18,13 @@ from typing import Any
 #: Defaults used when config.json is missing or unreadable. Mirrors the
 #: hardcoded defaults in :mod:`launchpad.config.settings`.
 DEFAULT_CONFIG: dict[str, Any] = {
-    "display": {"orientation": "portrait", "width": 480, "height": 800, "driver": "mock"},
+    "display": {
+        "orientation": "portrait",
+        "width": 480,
+        "height": 800,
+        "driver": "mock",
+        "layout": "classic",
+    },
     "refresh": {"refresh_seconds": 300},
     "features": {
         "nba": False,

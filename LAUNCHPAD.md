@@ -62,6 +62,9 @@ Key code paths:
 - `src/launchpad/factory.py` — composition root / concrete wiring
 - `src/launchpad/builder.py` — pure state builder and mode logic
 - `src/launchpad/rendering/` — layout/rendering
+  - `painter.py` — region-bounded drawing primitives shared by every layout
+  - `summaries.py` — what each section *says* (pure text), shared by every layout
+  - `portrait.py` / `layouts.py` — the classic stack, and the five alternatives
 - `src/launchpad/display/` — output drivers
 - `src/launchpad/services/` — data retrieval
 

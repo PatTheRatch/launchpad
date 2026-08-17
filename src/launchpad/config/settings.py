@@ -14,7 +14,7 @@ from typing import Any
 from launchpad.config import config_store
 from launchpad.config.features import FeatureFlags
 from launchpad.models.dashboard import DashboardMode
-from launchpad.models.geometry import Orientation
+from launchpad.models.geometry import Layout, Orientation
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +25,7 @@ class DisplaySettings:
     width: int = 480
     height: int = 800
     driver: str = "mock"  # e.g. "mock" or "eink"
+    layout: Layout = Layout.CLASSIC
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,12 +160,22 @@ def load_settings() -> Settings:
             "LAUNCHPAD_DISPLAY_ORIENTATION must be 'portrait' or 'landscape'."
         ) from exc
 
+    layout_value = os.getenv(
+        "LAUNCHPAD_DISPLAY_LAYOUT", display_defaults.get("layout", Layout.CLASSIC.value)
+    )
+    try:
+        layout = Layout(layout_value)
+    except ValueError as exc:
+        valid = ", ".join(item.value for item in Layout)
+        raise ValueError(f"LAUNCHPAD_DISPLAY_LAYOUT must be one of: {valid}.") from exc
+
     return Settings(
         display=DisplaySettings(
             orientation=orientation,
             width=_env_int("LAUNCHPAD_DISPLAY_WIDTH", display_defaults.get("width", 480)),
             height=_env_int("LAUNCHPAD_DISPLAY_HEIGHT", display_defaults.get("height", 800)),
             driver=os.getenv("LAUNCHPAD_DISPLAY_DRIVER", display_defaults.get("driver", "mock")),
+            layout=layout,
         ),
         refresh=RefreshSettings(
             refresh_seconds=_env_int(

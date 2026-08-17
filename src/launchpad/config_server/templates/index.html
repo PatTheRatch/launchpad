@@ -29,7 +29,8 @@
         </div>
 
         <div class="preview-side">
-          <div class="mode-tabs" role="tablist" aria-label="Preview mode">
+          <span class="field-label">Time of day</span>
+          <div class="chip-row" role="group" aria-label="Preview mode">
             <button type="button" class="mode-tab" data-mode="auto">Auto</button>
             <button type="button" class="mode-tab" data-mode="morning">Morning</button>
             <button type="button" class="mode-tab" data-mode="daytime">Daytime</button>
@@ -37,8 +38,19 @@
             <button type="button" class="mode-tab" data-mode="overnight">Overnight</button>
           </div>
 
+          <span class="field-label layout-label">Layout</span>
+          <div class="chip-row" role="group" aria-label="Preview layout">
+            <button type="button" class="layout-tab" data-layout="classic" title="Stacked sections, full detail">Classic</button>
+            <button type="button" class="layout-tab" data-layout="compact" title="One ledger row per section">Compact</button>
+            <button type="button" class="layout-tab" data-layout="hero" title="One giant number per mode">Hero</button>
+            <button type="button" class="layout-tab" data-layout="slots" title="Fixed zones; sections never move">Slots</button>
+            <button type="button" class="layout-tab" data-layout="cards" title="Lists full width, stats as tiles">Cards</button>
+            <button type="button" class="layout-tab" data-layout="timeline" title="The day on one vertical axis">Timeline</button>
+          </div>
+
           <div class="preview-actions">
-            <button type="button" id="cycle-btn" class="btn btn-secondary">▶ Cycle modes</button>
+            <button type="button" id="cycle-modes-btn" class="btn btn-secondary" data-axis="mode">▶ Cycle times of day</button>
+            <button type="button" id="cycle-layouts-btn" class="btn btn-secondary" data-axis="layout">▶ Cycle layouts</button>
             <button type="button" id="preview-refresh" class="btn btn-secondary">Refetch data</button>
             <button type="button" id="apply-mode-btn" class="btn btn-secondary">Send this view to the panel</button>
           </div>
@@ -71,6 +83,18 @@
           <select id="driver" name="driver">
             <option value="mock">Mock (PNG file)</option>
             <option value="eink">E-ink panel</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="layout">Layout</label>
+          <select id="layout" name="layout">
+            <option value="classic">Classic — stacked sections, full detail</option>
+            <option value="compact">Compact — one row per section</option>
+            <option value="hero">Hero — one giant number per mode</option>
+            <option value="slots">Slots — fixed zones</option>
+            <option value="cards">Cards — lists plus stat tiles</option>
+            <option value="timeline">Timeline — the day on one axis</option>
           </select>
         </div>
 
