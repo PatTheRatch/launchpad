@@ -1,4 +1,4 @@
-"""Portrait-orientation renderer.
+"""Portrait-orientation renderer: the classic stacked layout.
 
 Renders the dashboard onto a 1-bit (black & white) Pillow image sized for the
 480x800 e-ink panel, with a small typographic hierarchy (bold titles, medium
@@ -7,228 +7,52 @@ between sections.
 
 Layout is driven by ``state.visible_sections`` (already in mode/priority order)
 and dispatched per ``section.section`` — switching dashboard mode changes what
-is drawn without touching this renderer.
+is drawn without touching this renderer. Alternative arrangements of the same
+content live in :mod:`launchpad.rendering.layouts`; the drawing primitives and
+the section copy are shared via :mod:`~launchpad.rendering.painter` and
+:mod:`~launchpad.rendering.summaries`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw
 
 from launchpad.models.dashboard import DashboardState, Section, SectionState
-from launchpad.models.experimental.baby import Feed, FeedType
 from launchpad.models.experimental.nba import GameStatus
-from launchpad.models.geometry import Orientation, Size
+from launchpad.models.geometry import Orientation, Region, Size
 from launchpad.models.result import Availability
 from launchpad.models.train import DepartureStatus
 from launchpad.models.weather import WeatherCondition
 from launchpad.rendering.base import Renderer
-from launchpad.rendering.fonts import Font, load_font
 from launchpad.rendering.frame import Frame
+from launchpad.rendering.painter import (
+    GROUP_GAP,
+    LEADING,
+    WHITE,
+    Painter,
+    load_fonts,
+)
+from launchpad.rendering.summaries import (
+    CAVS_ABBREVIATION,
+    NBA_NICKNAMES,
+    condition_text,
+    elapsed_text,
+    feed_detail,
+    outerwear_hint,
+)
 from launchpad.rendering.weather_icons import draw_weather_icon
 
 LONDON = ZoneInfo("Europe/London")
-
-#: NBA team abbreviation -> nickname, used to render a friendly opponent name
-#: (e.g. "vs Bulls") from the abbreviations the NBA service provides.
-_NBA_NICKNAMES: dict[str, str] = {
-    "ATL": "Hawks",
-    "BOS": "Celtics",
-    "BKN": "Nets",
-    "CHA": "Hornets",
-    "CHI": "Bulls",
-    "CLE": "Cavaliers",
-    "DAL": "Mavericks",
-    "DEN": "Nuggets",
-    "DET": "Pistons",
-    "GSW": "Warriors",
-    "HOU": "Rockets",
-    "IND": "Pacers",
-    "LAC": "Clippers",
-    "LAL": "Lakers",
-    "MEM": "Grizzlies",
-    "MIA": "Heat",
-    "MIL": "Bucks",
-    "MIN": "Timberwolves",
-    "NOP": "Pelicans",
-    "NYK": "Knicks",
-    "OKC": "Thunder",
-    "ORL": "Magic",
-    "PHI": "76ers",
-    "PHX": "Suns",
-    "POR": "Trail Blazers",
-    "SAC": "Kings",
-    "SAS": "Spurs",
-    "TOR": "Raptors",
-    "UTA": "Jazz",
-    "WAS": "Wizards",
-}
-
-_CAVS_ABBREVIATION = "CLE"
-
-# Pixel values for 1-bit images: 1 = white background, 0 = black ink.
-_WHITE = 1
-_BLACK = 0
-
-# Typographic scale (px).
-_TITLE_PX = 30
-_PRIMARY_PX = 23
-_SECONDARY_PX = 17
-_META_PX = 18
-
-# Spacing.
-_MARGIN_X = 18
-_MARGIN_TOP = 14
-_LEADING = 7
-_DIVIDER_PAD = 9
-
-# Train row columns: the time right-aligns to a fixed column so every
-# departure time lines up vertically, with the status marker in a reserved
-# right-side area beyond it.
-_TRAIN_STATUS_AREA_W = 150
-_TRAIN_COL_GAP = 12
-
-# Vertical gap between stations within the trains section (smaller than a
-# divider, which separates whole sections).
-_STATION_GAP = 8
 
 # Weather icon, drawn beside the primary weather line. Sized to roughly the
 # primary text height; the line indents by this width plus a gap so text and
 # icon never overlap.
 _WEATHER_ICON_PX = 24
 _WEATHER_ICON_GAP = 12
-
-_ELLIPSIS = "..."
-
-
-@dataclass(frozen=True, slots=True)
-class _Fonts:
-    title: Font
-    primary: Font
-    secondary: Font
-    meta: Font
-
-
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font: Font) -> float:
-    return draw.textlength(text, font=font)
-
-
-def _truncate(draw: ImageDraw.ImageDraw, text: str, font: Font, max_width: float) -> str:
-    """Trim ``text`` from the right and append an ellipsis to fit ``max_width``."""
-    if _text_width(draw, text, font) <= max_width:
-        return text
-    if _text_width(draw, _ELLIPSIS, font) > max_width:
-        return ""
-    trimmed = text
-    while trimmed and _text_width(draw, trimmed + _ELLIPSIS, font) > max_width:
-        trimmed = trimmed[:-1]
-    return (trimmed + _ELLIPSIS) if trimmed else _ELLIPSIS
-
-
-class _Painter:
-    """A top-down cursor over the image; never draws past the panel height."""
-
-    def __init__(self, draw: ImageDraw.ImageDraw, fonts: _Fonts, width: int, height: int) -> None:
-        self.draw = draw
-        self.fonts = fonts
-        self.width = width
-        self.height = height
-        self.y = _MARGIN_TOP
-
-    @property
-    def exhausted(self) -> bool:
-        return self.y >= self.height
-
-    def _line_height(self, font: Font) -> int:
-        bbox = self.draw.textbbox((0, 0), "Ahgyltpq", font=font)
-        return int(bbox[3] - bbox[1]) + _LEADING
-
-    def line(self, text: str, font: Font, *, indent: int = 0, reserve_right: int = 0) -> None:
-        max_width = self.width - 2 * _MARGIN_X - indent - reserve_right
-        content = _truncate(self.draw, text, font, max_width)
-        line_height = self._line_height(font)
-        if self.y + line_height <= self.height:
-            self.draw.text((_MARGIN_X + indent, self.y), content, font=font, fill=_BLACK)
-        self.y += line_height
-
-    def train_row(self, destination: str, time_text: str, status_text: str) -> None:
-        """Draw a departure as fixed columns: destination | time | status.
-
-        The time right-aligns to a constant column so times stack vertically;
-        only the destination is truncated, keeping the time and status visible.
-        """
-        font = self.fonts.primary
-        line_height = self._line_height(font)
-        draw_this_row = self.y + line_height <= self.height
-
-        time_right_x = self.width - _MARGIN_X - _TRAIN_STATUS_AREA_W
-        time_x = time_right_x - _text_width(self.draw, time_text, font)
-        destination_max = time_x - _TRAIN_COL_GAP - _MARGIN_X
-        destination_text = _truncate(self.draw, destination, font, destination_max)
-
-        if draw_this_row:
-            self.draw.text((_MARGIN_X, self.y), destination_text, font=font, fill=_BLACK)
-            self.draw.text((time_x, self.y), time_text, font=font, fill=_BLACK)
-            if status_text:
-                status_x = time_right_x + _TRAIN_COL_GAP
-                status_max = (self.width - _MARGIN_X) - status_x
-                status = _truncate(self.draw, status_text, font, status_max)
-                self.draw.text((status_x, self.y), status, font=font, fill=_BLACK)
-        self.y += line_height
-
-    def title_with_status(self, title: str, status: str | None) -> None:
-        """Draw a section title, with an optional status right-aligned beside it.
-
-        The title uses the title font; the status uses the smaller secondary
-        font, vertically centered on the title. The title is truncated so it
-        never overlaps the status.
-        """
-        title_font = self.fonts.title
-        line_height = self._line_height(title_font)
-        if not status:
-            self.line(title, title_font)
-            return
-
-        status_font = self.fonts.secondary
-        status_width = _text_width(self.draw, status, status_font)
-        title_max = self.width - 2 * _MARGIN_X - status_width - _TRAIN_COL_GAP
-        title_text = _truncate(self.draw, title, title_font, title_max)
-        if self.y + line_height <= self.height:
-            self.draw.text((_MARGIN_X, self.y), title_text, font=title_font, fill=_BLACK)
-            status_h = self.draw.textbbox((0, 0), "Ag", font=status_font)[3]
-            status_y = self.y + max(0, (line_height - _LEADING - status_h) // 2)
-            self.draw.text(
-                (self.width - _MARGIN_X - status_width, status_y),
-                status,
-                font=status_font,
-                fill=_BLACK,
-            )
-        self.y += line_height
-
-    def header_row(self, left: str, right: str, font: Font) -> None:
-        line_height = self._line_height(font)
-        if self.y + line_height <= self.height:
-            self.draw.text((_MARGIN_X, self.y), left, font=font, fill=_BLACK)
-            right_width = _text_width(self.draw, right, font)
-            self.draw.text(
-                (self.width - _MARGIN_X - right_width, self.y), right, font=font, fill=_BLACK
-            )
-        self.y += line_height
-
-    def gap(self, px: int) -> None:
-        self.y += px
-
-    def divider(self) -> None:
-        self.y += _DIVIDER_PAD
-        if self.y <= self.height:
-            self.draw.line(
-                [(_MARGIN_X, self.y), (self.width - _MARGIN_X, self.y)], fill=_BLACK, width=1
-            )
-        self.y += _DIVIDER_PAD
 
 
 class PortraitRenderer(Renderer):
@@ -239,20 +63,16 @@ class PortraitRenderer(Renderer):
         return Orientation.PORTRAIT
 
     def render(self, state: DashboardState, size: Size) -> Frame:
-        img = Image.new("1", (size.width, size.height), _WHITE)
+        img = Image.new("1", (size.width, size.height), WHITE)
         draw = ImageDraw.Draw(img)
-        fonts = _Fonts(
-            title=load_font(_TITLE_PX, bold=True),
-            primary=load_font(_PRIMARY_PX),
-            secondary=load_font(_SECONDARY_PX),
-            meta=load_font(_META_PX, bold=True),
+        painter = Painter(
+            draw, load_fonts(), Region(0, 0, size.width, size.height)
         )
-        painter = _Painter(draw, fonts, size.width, size.height)
 
         self._draw_top_header(painter, state.generated_at)
         painter.divider()
 
-        handlers: dict[Section, Callable[[_Painter, SectionState], None]] = {
+        handlers: dict[Section, Callable[[Painter, SectionState], None]] = {
             Section.TRAINS: self._draw_trains,
             Section.CALENDAR: self._draw_calendar,
             Section.CALENDAR_TOMORROW: self._draw_calendar,
@@ -260,9 +80,7 @@ class PortraitRenderer(Renderer):
             Section.NBA: self._draw_nba,
             # "How long ago" is measured against the frame's own timestamp so
             # the renderer stays a pure function of the state.
-            Section.BABY: lambda painter, section: self._draw_baby(
-                painter, section, state.generated_at
-            ),
+            Section.BABY: lambda p, section: self._draw_baby(p, section, state.generated_at),
             Section.WORLD_CUP: self._draw_world_cup,
         }
 
@@ -281,11 +99,11 @@ class PortraitRenderer(Renderer):
         return Frame(size=size, buffer=img)
 
     @staticmethod
-    def _draw_top_header(painter: _Painter, when: datetime) -> None:
+    def _draw_top_header(painter: Painter, when: datetime) -> None:
         painter.header_row(f"{when:%A %d %B}", f"{when:%H:%M}", painter.fonts.meta)
 
     @staticmethod
-    def _draw_trains(painter: _Painter, section: SectionState) -> None:
+    def _draw_trains(painter: Painter, section: SectionState) -> None:
         # section.data is a tuple of StationArrivals, one per configured station.
         stations = section.data
         if section.availability is Availability.UNAVAILABLE or not stations:
@@ -297,7 +115,7 @@ class PortraitRenderer(Renderer):
             if painter.exhausted:
                 break
             if index > 0:
-                painter.gap(_STATION_GAP)
+                painter.gap(GROUP_GAP)
             # Show line status only when it's a disruption (hide "Good Service").
             status = station.line_status
             status_text = (
@@ -326,7 +144,7 @@ class PortraitRenderer(Renderer):
                 painter.train_row(departure.destination, f"{when:%H:%M}", status_text)
 
     @staticmethod
-    def _draw_calendar(painter: _Painter, section: SectionState) -> None:
+    def _draw_calendar(painter: Painter, section: SectionState) -> None:
         title = "Tomorrow" if section.section is Section.CALENDAR_TOMORROW else "Today"
         painter.line(title, painter.fonts.title)
 
@@ -345,7 +163,7 @@ class PortraitRenderer(Renderer):
             painter.line(f"{time_label}   {event.title}", painter.fonts.primary)
 
     @staticmethod
-    def _draw_world_cup(painter: _Painter, section: SectionState) -> None:
+    def _draw_world_cup(painter: Painter, section: SectionState) -> None:
         painter.line("WORLD CUP", painter.fonts.title)
 
         watchlist = section.data
@@ -361,7 +179,7 @@ class PortraitRenderer(Renderer):
             if painter.exhausted:
                 break
             if index > 0:
-                painter.gap(_STATION_GAP)
+                painter.gap(GROUP_GAP)
             painter.line(team.team_name, painter.fonts.title)
             if team.last_result:
                 painter.line(f"Last: {team.last_result}", painter.fonts.secondary)
@@ -372,7 +190,7 @@ class PortraitRenderer(Renderer):
                 painter.line(team.group_summary, painter.fonts.secondary)
 
     @staticmethod
-    def _draw_nba(painter: _Painter, section: SectionState) -> None:
+    def _draw_nba(painter: Painter, section: SectionState) -> None:
         painter.line("CAVS", painter.fonts.title)
 
         snapshot = section.data
@@ -381,9 +199,9 @@ class PortraitRenderer(Renderer):
             painter.line("No upcoming games", painter.fonts.secondary)
             return
 
-        is_home = game.home_team == _CAVS_ABBREVIATION
+        is_home = game.home_team == CAVS_ABBREVIATION
         opponent_abbr = game.away_team if is_home else game.home_team
-        opponent_name = _NBA_NICKNAMES.get(opponent_abbr, opponent_abbr)
+        opponent_name = NBA_NICKNAMES.get(opponent_abbr, opponent_abbr)
 
         if game.status is GameStatus.SCHEDULED:
             painter.line(f"vs {opponent_name}", painter.fonts.primary)
@@ -404,7 +222,7 @@ class PortraitRenderer(Renderer):
             painter.line("Final", painter.fonts.title)
 
     @staticmethod
-    def _draw_baby(painter: _Painter, section: SectionState, now: datetime) -> None:
+    def _draw_baby(painter: Painter, section: SectionState, now: datetime) -> None:
         snapshot = section.data
         if section.availability is Availability.UNAVAILABLE or snapshot is None:
             painter.line("Last feed", painter.fonts.title)
@@ -419,11 +237,11 @@ class PortraitRenderer(Renderer):
 
         ended_local = feed.ended_at.astimezone(LONDON)
         painter.title_with_status("Last feed", f"{ended_local:%-I:%M%p}".lower())
-        painter.line(_elapsed_text(now - feed.ended_at), painter.fonts.primary)
-        painter.line(_feed_detail(feed), painter.fonts.secondary)
+        painter.line(elapsed_text(now - feed.ended_at), painter.fonts.primary)
+        painter.line(feed_detail(feed), painter.fonts.secondary)
 
     @staticmethod
-    def _draw_weather(painter: _Painter, section: SectionState) -> None:
+    def _draw_weather(painter: Painter, section: SectionState) -> None:
         report = section.data
         title = report.location if report is not None else "Weather"
         painter.line(title, painter.fonts.title)
@@ -435,8 +253,8 @@ class PortraitRenderer(Renderer):
             return
 
         current = report.current
-        condition = _condition_text(current.condition)
-        primary = f"{round(current.temperature_c)}\u00b0C"
+        condition = condition_text(current.condition)
+        primary = f"{round(current.temperature_c)}°C"
         if condition:
             primary += f"   {condition}"
 
@@ -445,12 +263,12 @@ class PortraitRenderer(Renderer):
         draw_icon = current.condition is not WeatherCondition.UNKNOWN
         line_top = painter.y
         if draw_icon:
-            visible_h = painter._line_height(painter.fonts.primary) - _LEADING
+            visible_h = painter.line_height(painter.fonts.primary) - LEADING
             icon_y = line_top + max(0, (visible_h - _WEATHER_ICON_PX) // 2)
             draw_weather_icon(
                 painter.draw,
                 current.condition,
-                _MARGIN_X,
+                painter.left,
                 icon_y,
                 _WEATHER_ICON_PX,
             )
@@ -464,20 +282,20 @@ class PortraitRenderer(Renderer):
 
         details: list[str] = []
         if current.feels_like_c is not None:
-            details.append(f"Feels {round(current.feels_like_c)}\u00b0C")
+            details.append(f"Feels {round(current.feels_like_c)}°C")
         high_c: float | None = None
         precipitation_pct: float | None = None
         if report.forecast:
             forecast = report.forecast[0]
             high_c = forecast.high_c
             precipitation_pct = forecast.precipitation_pct
-            details.append(f"H {round(forecast.high_c)}\u00b0  L {round(forecast.low_c)}\u00b0")
+            details.append(f"H {round(forecast.high_c)}°  L {round(forecast.low_c)}°")
             if forecast.precipitation_pct is not None:
                 details.append(f"Rain {round(forecast.precipitation_pct)}%")
         if details:
             painter.line("   ".join(details), painter.fonts.secondary)
 
-        hint = _outerwear_hint(
+        hint = outerwear_hint(
             current.temperature_c,
             current.feels_like_c,
             high_c,
@@ -485,66 +303,3 @@ class PortraitRenderer(Renderer):
         )
         if hint:
             painter.line(hint, painter.fonts.secondary)
-
-
-#: Compact display labels for each feed type.
-_FEED_TYPE_LABELS: dict[FeedType, str] = {
-    FeedType.BREAST: "Breast",
-    FeedType.BOTTLE: "Bottle",
-    FeedType.FORMULA: "Formula",
-}
-
-
-def _elapsed_text(elapsed: timedelta) -> str:
-    """Humanize the time since the feed ended ("5m ago", "1h 20m ago")."""
-    minutes = int(elapsed.total_seconds() // 60)
-    if minutes < 1:
-        return "Just now"
-    hours, minutes = divmod(minutes, 60)
-    if hours < 1:
-        return f"{minutes}m ago"
-    days, hours = divmod(hours, 24)
-    if days < 1:
-        return f"{hours}h {minutes}m ago" if minutes else f"{hours}h ago"
-    return f"{days}d {hours}h ago" if hours else f"{days}d ago"
-
-
-def _feed_detail(feed: Feed) -> str:
-    """One compact line: "Formula · 80ml" or "Breast · right · 6m"."""
-    parts = [_FEED_TYPE_LABELS[feed.feed_type]]
-    if feed.feed_type is FeedType.BREAST:
-        if feed.side:
-            parts.append(feed.side)
-        if feed.duration_seconds:
-            # Never show a nonsense "0m" for a sub-30-second latch.
-            parts.append(f"{max(1, round(feed.duration_seconds / 60))}m")
-    elif feed.amount_ml is not None:
-        parts.append(f"{round(feed.amount_ml)}ml")
-    return " · ".join(parts)
-
-
-def _condition_text(condition: WeatherCondition) -> str:
-    if condition is WeatherCondition.UNKNOWN:
-        return ""
-    return str(condition.value).replace("_", " ").title()
-
-
-def _outerwear_hint(
-    temperature_c: float,
-    feels_like_c: float | None,
-    high_c: float | None,
-    precipitation_pct: float | None,
-) -> str | None:
-    """Return a compact clothing/weather hint when one is useful."""
-    feels = feels_like_c if feels_like_c is not None else temperature_c
-    high = high_c if high_c is not None else temperature_c
-
-    if precipitation_pct is not None and precipitation_pct >= 55:
-        return "Bring an umbrella"
-    if feels <= 5:
-        return "Wear a warm coat"
-    if feels <= 12 or high <= 14:
-        return "Bring a jacket"
-    if feels <= 17 and high <= 21:
-        return "Light jacket"
-    return None
