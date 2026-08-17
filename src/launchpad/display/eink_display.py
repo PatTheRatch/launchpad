@@ -10,10 +10,7 @@ must not raise.
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from PIL import Image
+from typing import Any
 
 from launchpad.display.base import Display, DisplayError
 from launchpad.models.geometry import Size

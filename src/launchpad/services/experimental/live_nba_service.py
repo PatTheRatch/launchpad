@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import json
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -62,7 +62,6 @@ def _summer_league_game(now: datetime) -> NbaGame | None:
         date_str = g.get("date", "")
         time_str = g.get("time_et", "19:00")
         opp_abbr = g.get("opponent_abbr", "???")
-        opp_name = g.get("opponent", "Unknown")
         home_away = g.get("home_away", "home")
 
         try:
@@ -202,7 +201,6 @@ def _fetch_espn_game(now: datetime, timeout_s: float = 8.0) -> NbaGame | None:
         # Build NbaGame from ESPN data.
         status_info = evt.get("status", {}).get("type", {})
         espn_state = status_info.get("state", "")
-        espn_detail = status_info.get("detail", "")
         period = comp.get("period", 0) or 0
         clock = status_info.get("displayClock", "")
 
