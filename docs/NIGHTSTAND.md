@@ -43,8 +43,36 @@ A real iOS widget, free, via the [Scriptable](https://scriptable.app) app:
 1. Install Scriptable from the App Store.
 2. Create a new script and paste in `docs/scriptable/LastFeedWidget.js`
    (adjust `HOST` if your tailnet name differs).
-3. Long-press the home screen → add a **Scriptable** widget (small) →
+3. **Run it inside Scriptable first** (the ▶ button). It previews the widget
+   and logs to the console, so any problem shows a real reason before you
+   put it on the home screen.
+4. Long-press the home screen → add a **Scriptable** widget (small) →
    configure it to run the script.
+
+### If the widget shows an error
+
+The widget reports the actual cause on its face rather than failing opaquely:
+
+| Widget says | Means | Fix |
+|---|---|---|
+| `HTTP 404` | The server is up but has no `/api/state.json` | The Pi is on older code: `cd /opt/launchpad && git pull && sudo systemctl restart launchpad-config` |
+| `Got HTML` | Something answered, but with a web page | Usually the same as above, or `HOST` points somewhere else |
+| `Unreachable` | The request never completed | Tailscale not connected on the phone, or the Pi is down |
+| `No feed` | Server reached, nothing to report | Enable **Baby Tracking** in the config UI, or check the second line for "Feeds unavailable" |
+
+Confirm the endpoint independently from any machine on the tailnet:
+
+```bash
+curl -i http://launchpad:8080/api/state.json | head -25
+```
+
+A `200` with JSON means the server side is fine and the problem is on the
+phone (usually Tailscale, or a `HOST` typo). Anything else is the Pi.
+
+> Scriptable's own error, *"The data couldn't be read because it isn't in the
+> correct format"*, means it received something that is not JSON — almost
+> always a Flask 404 page because the Pi has not pulled the code that adds
+> the endpoint.
 
 The elapsed time ticks live between refreshes — iOS renders the relative
 timestamp natively, so the widget doesn't need to wake to stay current. iOS
