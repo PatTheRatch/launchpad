@@ -188,8 +188,17 @@ API, if driving it programmatically:
 GET  /api/config
 POST /api/config                              # full config object, validated
 GET  /api/preview/<mode>.png?layout=<layout>  # &refresh=1 to bypass the 60s data cache
+GET  /api/state.json?mode=<mode>              # JSON state for the nightstand page and widgets
+GET  /display                                 # always-on phone/nightstand page
+POST /api/log/<bottle|diaper|sleep>           # WRITE path — see docs/LOGGING.md
 POST /api/restart
 ```
+
+**The `/api/log/*` endpoints write real records to Huckleberry.** They are a
+single attempt, never retried — an automatic retry of `log_bottle` is a
+duplicate feed in the child's history, not a no-op. Every successful write is
+mirrored to SQLite at `data/logbook.db` (gitignored); the mirror records what
+happened, never what was attempted. Do not add retry logic to this path.
 
 ---
 

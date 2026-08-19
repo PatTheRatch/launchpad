@@ -113,6 +113,41 @@ def display() -> str:
     return render_template("display.html")
 
 
+@app.post("/api/log/<kind>")
+def post_log(kind: str) -> tuple[Response, int] | Response:
+    """Log a care event (bottle, diaper, sleep) through to Huckleberry.
+
+    Writes are a single attempt, never retried server-side: on failure the
+    caller sees the error and a human decides whether to tap again.
+    """
+    from launchpad.config_server import writer as writer_module
+
+    log_writer = writer_module.shared_writer()
+    if log_writer is None:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Logging is not configured: enable baby tracking "
+                    "and set the Huckleberry credentials, then restart launchpad-config.",
+                }
+            ),
+            503,
+        )
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        recorded = log_writer.log(kind, payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except writer_module.FeedLogError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 502
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Logging failed: {exc}"}), 500
+
+    return jsonify({"status": "ok", "kind": kind, "logged": recorded})
+
+
 @app.post("/api/restart")
 def post_restart() -> tuple[Response, int] | Response:
     """Restart the launchpad systemd service."""

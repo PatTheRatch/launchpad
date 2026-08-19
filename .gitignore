@@ -35,3 +35,6 @@ config.local.*
 .DS_Store
 .idea/
 .vscode/
+
+# Local logbook (the baby's history lives outside the repo)
+data/
