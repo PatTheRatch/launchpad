@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en" data-mode="overnight">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#000000">
+  <title>Launchpad Display</title>
+  <style>
+    /* An always-on nightstand display: pure black ground (OLED pixels off),
+       dim warm text by day-dark, night-vision red overnight. */
+    :root {
+      --ink: #C9C3B8;
+      --dim: #6E6A62;
+      --faint: #3D3B36;
+      --rule: #26241F;
+    }
+    html[data-mode="overnight"] {
+      --ink: #B3402E;
+      --dim: #6E2A20;
+      --faint: #3B1712;
+      --rule: #2A100C;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: #000;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      cursor: default;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #stage {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 6vh 7vw;
+      gap: 4vh;
+      transition: transform 3s ease;
+    }
+    .eyebrow {
+      font-size: clamp(12px, 3.4vw, 20px);
+      font-weight: 600;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    #elapsed {
+      font-size: clamp(56px, 22vw, 200px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 0.95;
+      margin: 1.5vh 0 0;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    #feed-detail {
+      margin-top: 2vh;
+      font-size: clamp(15px, 4.6vw, 26px);
+      color: var(--dim);
+    }
+    #rows { border-top: 1px solid var(--rule); }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+      padding: 1.6vh 0;
+      border-bottom: 1px solid var(--rule);
+      font-size: clamp(13px, 4vw, 22px);
+      overflow: hidden;
+    }
+    .row .t {
+      color: var(--dim);
+      font-weight: 600;
+      white-space: nowrap;
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .row .v {
+      color: var(--faint);
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0; /* without this a flex child never shrinks, so no ellipsis */
+    }
+    html[data-mode="overnight"] .row .v { color: var(--dim); }
+    #foot {
+      position: fixed;
+      left: 0; right: 0; bottom: env(safe-area-inset-bottom, 0);
+      padding: 10px 7vw;
+      display: flex;
+      justify-content: space-between;
+      font-size: clamp(11px, 3vw, 14px);
+      color: var(--faint);
+    }
+    #foot .stale { color: var(--dim); }
+    @media (prefers-reduced-motion: reduce) { #stage { transition: none; } }
+  </style>
+</head>
+<body>
+  <main id="stage">
+    <div>
+      <div class="eyebrow" id="hero-label">Since last feed</div>
+      <div id="elapsed"><span id="elapsed-text">—</span></div>
+      <div id="feed-detail"></div>
+    </div>
+    <div id="rows"></div>
+  </main>
+  <div id="foot"><span id="foot-mode"></span><span id="foot-fresh"></span></div>
+
+  <script>
+    "use strict";
+    const qs = new URLSearchParams(location.search);
+    const MODE = qs.get("mode") || "auto";
+    const POLL_MS = 60_000;
+    const TICK_MS = 10_000;
+    const STALE_MS = 15 * 60_000;
+
+    const el = (id) => document.getElementById(id);
+    let state = null;
+    let lastOkAt = 0;
+
+    // Mirrors summaries.elapsed_text on the server, minus the "ago" suffix —
+    // the "SINCE LAST FEED" eyebrow carries it.
+    function elapsedText(ms) {
+      let minutes = Math.floor(ms / 60_000);
+      if (minutes < 1) return "Just now";
+      let hours = Math.floor(minutes / 60);
+      minutes %= 60;
+      if (hours < 1) return `${minutes}m`;
+      const days = Math.floor(hours / 24);
+      hours %= 24;
+      if (days < 1) return hours && minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+      return hours ? `${days}d ${hours}h` : `${days}d`;
+    }
+
+    function finishedLabel(iso) {
+      const when = new Date(iso);
+      let h = when.getHours() % 12 || 12;
+      const m = String(when.getMinutes()).padStart(2, "0");
+      return `${h}:${m}${when.getHours() < 12 ? "am" : "pm"}`;
+    }
+
+    // CSS clamp() can't know the text width, so after the text changes the
+    // hero shrinks until it fits on one line ("2h 40m" vs "12d 3h"). Measure
+    // the inline span: a block box with overflowing text reports scrollWidth
+    // equal to clientWidth, so measuring the box itself never detects it.
+    let lastHero = "";
+    function fitHero() {
+      const box = el("elapsed");
+      const span = el("elapsed-text");
+      if (span.textContent === lastHero) return;
+      lastHero = span.textContent;
+      box.style.fontSize = "";
+      let size = parseFloat(getComputedStyle(box).fontSize);
+      let guard = 40;
+      while (span.getBoundingClientRect().width > box.clientWidth && size > 24 && guard--) {
+        size *= 0.92;
+        box.style.fontSize = `${size}px`;
+      }
+    }
+
+    function tick() {
+      if (!state) return;
+      const feed = state.feed;
+      if (feed) {
+        el("elapsed-text").textContent = elapsedText(Date.now() - new Date(feed.ended_at));
+        el("feed-detail").textContent = `${feed.detail} · finished ${finishedLabel(feed.ended_at)}`;
+      } else {
+        const baby = (state.sections || []).find((s) => s.section === "baby");
+        el("elapsed-text").textContent = "—";
+        el("feed-detail").textContent = baby ? baby.line : "Feed tracking is off";
+      }
+      const stale = Date.now() - lastOkAt > STALE_MS;
+      const fetched = state.fetched_at ? new Date(state.fetched_at) : null;
+      el("foot-fresh").textContent = fetched
+        ? `${stale ? "stale · " : ""}data ${String(fetched.getHours()).padStart(2, "0")}:${String(fetched.getMinutes()).padStart(2, "0")}`
+        : "";
+      el("foot-fresh").className = stale ? "stale" : "";
+      fitHero();
+    }
+
+    // Section text includes external data (e.g. TfL destination names);
+    // escape it before it touches innerHTML.
+    function esc(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function renderRows() {
+      const rows = (state.sections || [])
+        .filter((s) => s.section !== "baby")
+        .slice(0, 4)
+        .map((s) => `<div class="row"><span class="t">${esc(s.title)}</span><span class="v">${esc(s.line)}</span></div>`)
+        .join("");
+      el("rows").innerHTML = rows;
+      el("foot-mode").textContent = state.mode || "";
+      document.documentElement.dataset.mode = state.mode || "overnight";
+    }
+
+    async function poll(refresh = false) {
+      try {
+        const url = `/api/state.json?mode=${encodeURIComponent(MODE)}${refresh ? "&refresh=1" : ""}`;
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        state = await response.json();
+        lastOkAt = Date.now();
+        renderRows();
+      } catch (err) {
+        // Keep showing the last good state; the footer flips to "stale".
+      }
+      tick();
+    }
+
+    // Burn-in guard: drift the whole stage a few pixels on a slow cycle so no
+    // glyph sits on the same OLED pixels all night.
+    const DRIFT = [[0, 0], [3, 2], [-2, 4], [-4, -2], [2, -4], [4, 3], [-3, -3]];
+    let driftIndex = 0;
+    setInterval(() => {
+      driftIndex = (driftIndex + 1) % DRIFT.length;
+      el("stage").style.transform = `translate(${DRIFT[driftIndex][0]}px, ${DRIFT[driftIndex][1]}px)`;
+    }, 90_000);
+
+    // Best-effort screen wake lock (requires HTTPS; harmless when it fails —
+    // set Auto-Lock to Never instead).
+    async function keepAwake() {
+      try { await navigator.wakeLock.request("screen"); } catch (err) { /* no-op */ }
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) { keepAwake(); poll(); }
+    });
+    document.addEventListener("click", () => poll(true));
+
+    window.addEventListener("resize", () => { lastHero = ""; tick(); });
+
+    keepAwake();
+    poll();
+    setInterval(() => poll(), POLL_MS);
+    setInterval(tick, TICK_MS);
+  </script>
+</body>
+</html>
