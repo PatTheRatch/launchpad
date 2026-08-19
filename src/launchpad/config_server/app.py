@@ -82,6 +82,37 @@ def get_preview(mode: str) -> tuple[Response, int] | Response:
     return response
 
 
+@app.get("/api/state.json")
+def get_state() -> tuple[Response, int] | Response:
+    """The current dashboard state as JSON, for the nightstand page and widgets.
+
+    ``?mode=`` forces a time-of-day mode (default "auto"); ``?refresh=1``
+    bypasses the shared 60s service-data cache.
+    """
+    from launchpad.config_server import preview as preview_module
+    from launchpad.config_server.state import state_payload
+
+    try:
+        resolved = preview_module.shared_preview().resolve_state(
+            request.args.get("mode", "auto"), refresh="refresh" in request.args
+        )
+    except preview_module.PreviewError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+    except Exception as exc:
+        # A state failure must never take the config UI down with it.
+        return jsonify({"status": "error", "message": f"State failed: {exc}"}), 500
+
+    response = jsonify(state_payload(resolved.state, resolved.fetched_at))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/display")
+def display() -> str:
+    """Serve the always-on nightstand display page."""
+    return render_template("display.html")
+
+
 @app.post("/api/restart")
 def post_restart() -> tuple[Response, int] | Response:
     """Restart the launchpad systemd service."""

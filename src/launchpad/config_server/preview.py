@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 if TYPE_CHECKING:
     from launchpad.builder import DashboardInputs
     from launchpad.config.settings import Settings
+    from launchpad.models.dashboard import DashboardState
 
 LONDON = ZoneInfo("Europe/London")
 
@@ -40,6 +41,16 @@ MODE_AUTO = "auto"
 
 class PreviewError(Exception):
     """A preview could not be rendered; the message is user-facing."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedState:
+    """A built dashboard state plus how it was produced — shared by the PNG
+    preview and the JSON state endpoint so both draw from one data cache."""
+
+    state: "DashboardState"
+    settings: "Settings"
+    fetched_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,25 +100,16 @@ class LivePreview:
         self._lock = threading.Lock()
         self._cached: tuple[DashboardInputs, datetime] | None = None
 
-    def render_png(
-        self, mode_name: str, refresh: bool = False, layout_name: str | None = None
-    ) -> PreviewFrame:
-        """Render ``mode_name`` ("auto" or a DashboardMode value) as a PNG.
+    def resolve_state(self, mode_name: str = MODE_AUTO, refresh: bool = False) -> ResolvedState:
+        """Collect (or reuse cached) service data and build the state for a mode.
 
-        ``layout_name`` overrides the saved layout for this render only, so
-        layouts can be compared without touching the panel's configuration.
         ``refresh=True`` discards the cached service data first. Raises
-        :class:`PreviewError` for unknown modes or layouts; service failures
-        never raise (they arrive as unavailable Results and render as
-        placeholders).
+        :class:`PreviewError` for unknown modes; service failures never raise
+        (they arrive as unavailable Results inside the state).
         """
-        from dataclasses import replace
-
         from launchpad.builder import DashboardStateBuilder
         from launchpad.config.settings import load_settings
-        from launchpad.factory import build_renderer
         from launchpad.models.dashboard import DashboardMode
-        from launchpad.models.geometry import Layout, Size
 
         if mode_name == MODE_AUTO:
             override = None
@@ -117,16 +119,6 @@ class LivePreview:
             except ValueError:
                 valid = ", ".join([MODE_AUTO, *(m.value for m in DashboardMode)])
                 raise PreviewError(f"Unknown mode {mode_name!r}. Expected one of: {valid}.")
-
-        layout: Layout | None = None
-        if layout_name is not None:
-            try:
-                layout = Layout(layout_name)
-            except ValueError:
-                valid = ", ".join(item.value for item in Layout)
-                raise PreviewError(
-                    f"Unknown layout {layout_name!r}. Expected one of: {valid}."
-                )
 
         now = self._clock()
         # Settings reload every render so a freshly saved config.json (flags,
@@ -141,10 +133,38 @@ class LivePreview:
 
         if override is None:
             override = settings.force_mode
+        state = DashboardStateBuilder().build(now, inputs, settings.features, override)
+        return ResolvedState(state=state, settings=settings, fetched_at=fetched_at)
+
+    def render_png(
+        self, mode_name: str, refresh: bool = False, layout_name: str | None = None
+    ) -> PreviewFrame:
+        """Render ``mode_name`` ("auto" or a DashboardMode value) as a PNG.
+
+        ``layout_name`` overrides the saved layout for this render only, so
+        layouts can be compared without touching the panel's configuration.
+        Raises :class:`PreviewError` for unknown modes or layouts.
+        """
+        from dataclasses import replace
+
+        from launchpad.factory import build_renderer
+        from launchpad.models.geometry import Layout, Size
+
+        layout: Layout | None = None
+        if layout_name is not None:
+            try:
+                layout = Layout(layout_name)
+            except ValueError:
+                valid = ", ".join(item.value for item in Layout)
+                raise PreviewError(
+                    f"Unknown layout {layout_name!r}. Expected one of: {valid}."
+                )
+
+        resolved = self.resolve_state(mode_name, refresh=refresh)
+        settings, state, fetched_at = resolved.settings, resolved.state, resolved.fetched_at
         if layout is not None:
             settings = replace(settings, display=replace(settings.display, layout=layout))
 
-        state = DashboardStateBuilder().build(now, inputs, settings.features, override)
         size = Size(settings.display.width, settings.display.height)
         frame = build_renderer(settings).render(state, size)
 
