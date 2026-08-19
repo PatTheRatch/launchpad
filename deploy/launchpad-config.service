@@ -19,7 +19,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=aisha
+User=launchpad
 Group=launchpad
 WorkingDirectory=/opt/launchpad
 Environment=PYTHONPATH=src

@@ -31,6 +31,42 @@ Permissions model:
 - shared Linux group: `launchpad`
 - repository is group-writable for shared operation
 
+The appliance separates *who runs it* from *who may change it*:
+
+- **`launchpad`** — a no-login system account that owns `/opt/launchpad` and runs
+  both services. It is a member of `spi` and `gpio` so it can drive the panel.
+  Nothing logs in as this account.
+- **operator accounts** — humans and agents (`patrick`, `aisha`, any additional
+  agent account) are members of the `launchpad` *group*. They may edit the
+  repository and restart the services; they do not run them.
+
+Adding or removing an operator is therefore a single `usermod -aG launchpad
+<user>` with no service or repository change. Provisioning:
+
+```bash
+sudo useradd --system --home-dir /opt/launchpad --shell /usr/sbin/nologin launchpad
+sudo usermod -aG spi,gpio launchpad
+sudo usermod -aG launchpad <operator>
+sudo install -d -o launchpad -g launchpad -m 2775 /opt/launchpad
+```
+
+The `2775` mode matters: the setgid bit makes new files inherit the `launchpad`
+group instead of the creating user's primary group. Pair it with
+`git config core.sharedRepository group` inside the checkout, or git writes
+files at `644` and other operators can read but not edit them.
+
+`.env` must be readable by the service account, not just by whoever created it:
+
+```bash
+sudo chown launchpad:launchpad /opt/launchpad/.env
+sudo chmod 640 /opt/launchpad/.env
+```
+
+At `600` owned by an operator, the services start but silently fail to read
+`TFL_APP_KEY` and the Huckleberry credentials. `640` means every member of the
+`launchpad` group can read those secrets — the intended trust model here, worth
+stating explicitly.
+
 ## 3. Current repository status
 
 Git remote:
@@ -139,7 +175,7 @@ Current state:
   - lazy-imports hardware libraries so Mac dev environments never fail
   - set `LAUNCHPAD_DISPLAY_DRIVER=eink` to use real hardware
   - uses SPI (CE0) + GPIO pins (DC=25, RST=17, BUSY=24)
-  - requires `aisha` user in `spi` and `gpio` groups
+  - requires the `launchpad` service account in `spi` and `gpio` groups
 
 ### Hardware setup
 Waveshare library at `/opt/e-Paper/` (git clone), symlinked into venv.
@@ -280,7 +316,7 @@ Two unit files are checked in under `deploy/`:
 
 **Dashboard** (`deploy/launchpad.service`):
 Runs the dashboard continuously with `LAUNCHPAD_DISPLAY_DRIVER=eink` as
-`User=aisha` / `Group=launchpad`, restarting on failure.
+`User=launchpad` / `Group=launchpad`, restarting on failure.
 
 **Config UI** (`deploy/launchpad-config.service`):
 Serves the web config UI on port 8080. Runs independently of the dashboard
@@ -295,12 +331,17 @@ journalctl -u launchpad -f
 ```
 
 The config UI's "Restart Dashboard" button calls `sudo systemctl restart launchpad`.
-For this to work, `/etc/sudoers.d/launchpad` must allow `aisha` passwordless sudo
-for those commands:
+For this to work, `/etc/sudoers.d/launchpad` must grant the `launchpad` group
+passwordless sudo for those commands — the group, not a named user, so every
+operator (including agent accounts) can drive the button without a rule change:
 ```
-aisha ALL=(root) NOPASSWD: /usr/bin/systemctl restart launchpad
-aisha ALL=(root) NOPASSWD: /usr/bin/systemctl status launchpad
+%launchpad ALL=(root) NOPASSWD: /usr/bin/systemctl restart launchpad
+%launchpad ALL=(root) NOPASSWD: /usr/bin/systemctl status launchpad
 ```
+
+Keep this grant to exactly these two commands. Broad `NOPASSWD: ALL` on a
+network-reachable appliance that holds credentials is a much larger blast radius
+than the restart button needs, especially for unattended agent accounts.
 
 ## 14. Common commands
 
@@ -347,7 +388,7 @@ mypy src
 
 ### Git "dubious ownership"
 Symptom:
-- git refuses to operate in `/opt/launchpad` for the `aisha` account
+- git refuses to operate in `/opt/launchpad` for an operator account
 
 Observed workaround:
 ```bash
