@@ -100,6 +100,15 @@ class LivePreview:
         self._lock = threading.Lock()
         self._cached: tuple[DashboardInputs, datetime] | None = None
 
+    def invalidate(self) -> None:
+        """Drop the cached service data so the next render refetches.
+
+        Called after a successful write, so every view reflects the new event
+        on its next poll instead of waiting out the TTL.
+        """
+        with self._lock:
+            self._cached = None
+
     def resolve_state(self, mode_name: str = MODE_AUTO, refresh: bool = False) -> ResolvedState:
         """Collect (or reuse cached) service data and build the state for a mode.
 
