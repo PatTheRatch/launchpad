@@ -187,6 +187,24 @@ cd /opt/launchpad
 PYTHONPATH=src LAUNCHPAD_DISPLAY_DRIVER=eink .venv/bin/python3 -m launchpad
 ```
 
+### Diagnosing a "stuck" panel
+
+`run_forever()` only catches `KeyboardInterrupt` (see `app.py`), so any
+`DisplayError` — a loose ribbon cable is the classic cause after physically
+moving the unit — kills the process. `Restart=on-failure` then relaunches it
+every 30s, which fails at the same spot and dies again: a silent crash-loop
+where `systemctl status` genuinely says "active" the whole time while the
+panel is frozen on the last frame that made it through.
+
+`journalctl -u launchpad -n 60` shows which case you're in — repeated
+tracebacks restarting every ~30s means the crash-loop above; a quiet log with
+an old last line means it's hung, not crashed (a plain restart is the fix).
+
+For the ribbon-cable case specifically, `scripts/eink_diagnose.py` drives the
+panel's init/clear cycle in isolation (stop `launchpad.service` first, since
+both hold the same SPI/GPIO lines) and reports a clear diagnosis rather than
+just hanging.
+
 ### Configuration web UI
 A Flask-based config server runs alongside the dashboard at
 `http://launchpad.local:8080`. It reads/writes `config.json` (persistent

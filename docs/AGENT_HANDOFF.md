@@ -321,10 +321,20 @@ file /tmp/preview.png     # expect: PNG image data, 480 x 800, 1-bit
    would show a confidently wrong "No feeds logged yet".
 8. **Time since feed is measured from when the feed *ended***: breast = start + both durations,
    bottle = start (parents log a bottle at finish).
-9. **If apt reports "dpkg was interrupted"**, run `sudo dpkg --configure -a` then
+9. **A "stuck" panel with the service reporting "active" is very likely a
+   silent crash-loop, not a hang.** `run_forever()` only catches
+   `KeyboardInterrupt`; any `DisplayError` (a loose ribbon cable after a
+   physical move is the classic trigger) kills the process, and
+   `Restart=on-failure` relaunches it every 30s forever — each attempt fails
+   at the same spot before it reaches the panel, so the screen never
+   updates while `systemctl status` reports "active" throughout. Check
+   `journalctl -u launchpad -n 60` for repeated tracebacks before assuming a
+   plain restart will fix it. `scripts/eink_diagnose.py` isolates the
+   hardware link from the app to confirm which case you're in.
+10. **If apt reports "dpkg was interrupted"**, run `sudo dpkg --configure -a` then
    `sudo apt-get -f install`. Never delete `/var/lib/dpkg/lock*` — that turns a recoverable state
    into a corrupted package database.
-10. **A Pi 5 with an external drive needs the 27 W supply.** Under-powering shows up as the machine
+11. **A Pi 5 with an external drive needs the 27 W supply.** Under-powering shows up as the machine
     resetting during sustained I/O (`vcgencmd get_throttled` should read `0x0`).
 
 ---
