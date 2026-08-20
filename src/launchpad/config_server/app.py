@@ -200,6 +200,99 @@ def post_log(kind: str) -> tuple[Response, int] | Response:
     return jsonify({"status": "ok", "kind": kind, "logged": recorded})
 
 
+@app.get("/api/history.json")
+def get_history() -> Response:
+    """Launchpad's own mirrored history: feeds, diapers, and sleep.
+
+    ``?days=`` limits how far back (default 7), ``?kind=`` filters
+    (repeatable), ``?limit=`` caps rows (default 200).
+    """
+    from launchpad.config_server import sync as sync_module
+
+    days = request.args.get("days", type=float) or 7.0
+    limit = min(request.args.get("limit", type=int) or 200, 2000)
+    kinds = request.args.getlist("kind") or None
+    since = time.time() - days * 86400
+
+    logbook = sync_module.shared_logbook()
+    response = jsonify(
+        {
+            "days": days,
+            "counts": logbook.counts(),
+            "span": list(logbook.span()),
+            "entries": logbook.history(kinds=kinds, since=since, limit=limit),
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/export.csv")
+def get_export() -> Response:
+    """Export the mirrored history as CSV — the data is yours to take."""
+    import csv
+    import io
+
+    from launchpad.config_server import sync as sync_module
+    from launchpad.services.experimental.huckleberry_sync import export_rows
+
+    days = request.args.get("days", type=float) or 3650.0
+    kinds = request.args.getlist("kind") or None
+    history = sync_module.shared_logbook().history(
+        kinds=kinds, since=time.time() - days * 86400, limit=100_000
+    )
+
+    buffer = io.StringIO()
+    csv.writer(buffer).writerows(export_rows(history))
+    response = Response(buffer.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = 'attachment; filename="launchpad-history.csv"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/sync.json")
+def get_sync_status() -> tuple[Response, int] | Response:
+    """Whether history mirroring is running, and what it last did."""
+    from launchpad.config_server import sync as sync_module
+
+    scheduler = sync_module.scheduler()
+    if scheduler is None:
+        return jsonify({"enabled": False, "counts": sync_module.shared_logbook().counts()})
+    return jsonify({"enabled": True, **scheduler.status()})
+
+
+@app.post("/api/sync")
+def post_sync() -> tuple[Response, int] | Response:
+    """Mirror upstream history now. ``?days=`` overrides the window."""
+    from launchpad.config_server import sync as sync_module
+    from launchpad.services.experimental.huckleberry_sync import SyncError
+
+    scheduler = sync_module.scheduler()
+    if scheduler is None:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "History mirroring is not configured: enable baby tracking "
+                    "and set the Huckleberry credentials, then restart launchpad-config.",
+                }
+            ),
+            503,
+        )
+
+    days = request.args.get("days", type=float)
+    try:
+        report = scheduler.sync_now(days=days)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except SyncError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 502
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Sync failed: {exc}"}), 500
+
+    return jsonify({"status": "ok", "report": report})
+
+
 @app.post("/api/restart")
 def post_restart() -> tuple[Response, int] | Response:
     """Restart the launchpad systemd service."""

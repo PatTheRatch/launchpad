@@ -18,13 +18,15 @@ def main() -> int:
     # Real-time watching starts here rather than at import, so importing the
     # app (in tests, or another process) never opens a network connection.
     # It is best-effort: if it cannot start, the server runs on polling alone.
-    from launchpad.config_server import realtime
+    from launchpad.config_server import realtime, sync
 
     realtime.start_watcher()
+    sync.start_scheduler()
     try:
         app.run(host=host, port=port, debug=False)
     finally:
         realtime.stop_watcher()
+        sync.stop_scheduler()
     return 0
 
 
