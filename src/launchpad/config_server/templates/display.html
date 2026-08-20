@@ -107,6 +107,16 @@
       color: var(--faint);
     }
     #foot .stale { color: var(--dim); }
+    #live {
+      display: inline-block;
+      width: 0.5em; height: 0.5em;
+      border-radius: 50%;
+      background: var(--dim);
+      margin-right: 0.5em;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+    #live.on { opacity: 1; }
     @media (prefers-reduced-motion: reduce) { #stage { transition: none; } }
   </style>
 </head>
@@ -119,7 +129,7 @@
     </div>
     <div id="rows"></div>
   </main>
-  <div id="foot"><span id="foot-mode"></span><span id="foot-fresh"></span></div>
+  <div id="foot"><span><span id="live"></span><span id="foot-mode"></span></span><span id="foot-fresh"></span></div>
 
   <script>
     "use strict";
@@ -247,7 +257,34 @@
 
     window.addEventListener("resize", () => { lastHero = ""; tick(); });
 
+    // Live updates: the server pushes a version bump whenever Huckleberry
+    // changes, and we re-fetch through the normal path. This is purely an
+    // accelerator — the interval poll below still runs, so if the stream is
+    // unavailable the page is merely slower, never wrong.
+    let events = null;
+    function connectEvents() {
+      if (!window.EventSource) return;
+      try {
+        events = new EventSource("/api/events");
+      } catch (err) {
+        return;
+      }
+      events.addEventListener("hello", () => el("live").classList.add("on"));
+      events.addEventListener("change", () => {
+        el("live").classList.add("on");
+        poll();
+      });
+      events.onerror = () => {
+        // EventSource reconnects on its own; just drop the indicator so the
+        // footer never claims to be live when it isn't.
+        el("live").classList.remove("on");
+      };
+    }
+
+    window.addEventListener("pagehide", () => { if (events) events.close(); });
+
     keepAwake();
+    connectEvents();
     poll();
     setInterval(() => poll(), POLL_MS);
     setInterval(tick, TICK_MS);

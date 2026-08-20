@@ -14,7 +14,17 @@ from launchpad.config_server.app import app
 def main() -> int:
     host = os.getenv("LAUNCHPAD_CONFIG_HOST", "0.0.0.0")
     port = int(os.getenv("LAUNCHPAD_CONFIG_PORT", "8080"))
-    app.run(host=host, port=port, debug=False)
+
+    # Real-time watching starts here rather than at import, so importing the
+    # app (in tests, or another process) never opens a network connection.
+    # It is best-effort: if it cannot start, the server runs on polling alone.
+    from launchpad.config_server import realtime
+
+    realtime.start_watcher()
+    try:
+        app.run(host=host, port=port, debug=False)
+    finally:
+        realtime.stop_watcher()
     return 0
 
 
