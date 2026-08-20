@@ -29,6 +29,10 @@ A success answers `{"status": "ok", "kind": …, "logged": {…}}` and the
 dashboard preview, nightstand page, and widget pick the new event up on their
 next poll (the shared cache is invalidated on every successful write).
 
+With real-time watching active (see `docs/REALTIME.md`) the nightstand page
+updates within a second of *anyone* logging — you, your wife in the app, or a
+shortcut — instead of waiting out a poll.
+
 **Semantics that matter:**
 
 - **Writes are never retried server-side.** A failure returns an error and a

@@ -191,8 +191,19 @@ GET  /api/preview/<mode>.png?layout=<layout>  # &refresh=1 to bypass the 60s dat
 GET  /api/state.json?mode=<mode>              # JSON state for the nightstand page and widgets
 GET  /display                                 # always-on phone/nightstand page
 POST /api/log/<bottle|diaper|sleep>           # WRITE path — see docs/LOGGING.md
+GET  /api/events                              # SSE: version bump on upstream change
+GET  /api/realtime.json                       # is real-time watching alive?
 POST /api/restart
 ```
+
+**Real-time watching is an accelerator, never a source of truth.** The
+watcher holds a Firestore subscription so changes appear in about a second
+instead of a poll interval, but the library cannot hold one open
+indefinitely: nothing refreshes the auth token in the background, and
+`refresh_session_token()` recreates listeners against a client still built
+from the old token. So each session is rebuilt from scratch every 40 minutes,
+and every consumer keeps polling underneath. If the watcher dies, the system
+gets slower and never wrong — do not make anything depend on it.
 
 **The `/api/log/*` endpoints write real records to Huckleberry.** They are a
 single attempt, never retried — an automatic retry of `log_bottle` is a

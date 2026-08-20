@@ -10,7 +10,9 @@ additionally renders dashboard frames in-process (see
 
 from __future__ import annotations
 
+import queue
 import subprocess
+import time
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request
@@ -20,6 +22,12 @@ from launchpad.models.dashboard import DashboardMode
 from launchpad.models.geometry import Layout, Orientation
 
 app = Flask(__name__)
+
+#: SSE tuning: heartbeat often enough to hold the connection open, and close
+#: the stream well before anything upstream decides to time it out.
+_SSE_HEARTBEAT_SECONDS = 20.0
+_SSE_MAX_SECONDS = 300.0
+_SSE_RETRY_MS = 3000
 
 _DRIVERS = ("mock", "eink")
 _FEATURE_KEYS = ("nba", "fantasy_basketball", "baby_tracking", "world_cup")
@@ -111,6 +119,50 @@ def get_state() -> tuple[Response, int] | Response:
 def display() -> str:
     """Serve the always-on nightstand display page."""
     return render_template("display.html")
+
+
+@app.get("/api/realtime.json")
+def get_realtime() -> Response:
+    """Whether real-time watching is active, and what it has seen."""
+    from launchpad.config_server import realtime
+
+    response = jsonify(realtime.status())
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/events")
+def get_events() -> Response:
+    """Server-sent events: a version bump whenever Huckleberry changes.
+
+    Clients re-fetch ``/api/state.json`` on each bump, so pushed and polled
+    state can never disagree. The stream carries heartbeats and closes itself
+    after a bounded lifetime; EventSource reconnects automatically, which
+    keeps a long-lived page from pinning a worker thread indefinitely.
+    """
+    from launchpad.config_server import realtime
+
+    broker = realtime.broker()
+
+    def stream() -> Any:
+        subscriber = broker.subscribe()
+        try:
+            yield f"retry: {_SSE_RETRY_MS}\n\n"
+            yield f"event: hello\ndata: {broker.version}\n\n"
+            deadline = time.monotonic() + _SSE_MAX_SECONDS
+            while time.monotonic() < deadline:
+                try:
+                    version = subscriber.get(timeout=_SSE_HEARTBEAT_SECONDS)
+                    yield f"event: change\ndata: {version}\n\n"
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+        finally:
+            broker.unsubscribe(subscriber)
+
+    response = Response(stream(), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Accel-Buffering"] = "no"  # defeat proxy buffering
+    return response
 
 
 @app.post("/api/log/<kind>")
