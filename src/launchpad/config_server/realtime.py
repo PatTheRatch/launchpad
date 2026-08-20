@@ -125,6 +125,12 @@ def start_watcher() -> Any:
                 # follows the version bump actually sees the new event.
                 preview_module.shared_preview().invalidate()
                 _broker.publish(source)
+                # Mirror the new entry promptly, whoever logged it.
+                from launchpad.config_server import sync as sync_module
+
+                scheduler = sync_module.scheduler()
+                if scheduler is not None:
+                    scheduler.poke()
 
             started = FeedWatcher(email=email, password=password, on_change=on_change)
             started.start()

@@ -193,8 +193,21 @@ GET  /display                                 # always-on phone/nightstand page
 POST /api/log/<bottle|diaper|sleep>           # WRITE path — see docs/LOGGING.md
 GET  /api/events                              # SSE: version bump on upstream change
 GET  /api/realtime.json                       # is real-time watching alive?
+GET  /api/history.json?days=&kind=            # Launchpad's own mirrored history
+GET  /api/export.csv                          # take the data — see docs/HISTORY.md
+GET  /api/sync.json                           # mirroring status
+POST /api/sync?days=                          # mirror upstream history now
 POST /api/restart
 ```
+
+**The mirror in `data/logbook.db` is the one thing GitHub cannot restore.**
+`intervals` holds the full care history (logged by anyone, not just through
+Launchpad); `events` is an append-only audit of our own writes. Feeds and
+diapers have no stable upstream id, so rows key on `(kind, start)` with
+`lastUpdated` breaking ties — that is what makes an in-app edit update in
+place instead of duplicating. Reconciliation is **bounded to the synced
+window**, so a short routine sync cannot wipe the archive; never widen a
+delete to cover rows outside the window it fetched.
 
 **Real-time watching is an accelerator, never a source of truth.** The
 watcher holds a Firestore subscription so changes appear in about a second
